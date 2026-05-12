@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List
 
 from app.db.database import get_db
 from app.db import models
-from app.services.llm import generate_ai_response
+from app.services.llm import generate_ai_response, generate_ai_response_stream
 
 # ==========================================
 # API 路由与接口 (处理 HTTP 请求)
@@ -18,6 +19,7 @@ router = APIRouter()
 # 自动验证前端传过来的 JSON 数据格式，不符合会直接报错 422
 class ChatRequest(BaseModel):
     message: str
+    system_prompt: str = ""  # V2.0 新增：支持系统角色设定
 
 class ChatResponse(BaseModel):
     reply: str
@@ -27,6 +29,38 @@ class MessageDTO(BaseModel):
     content: str
     created_at: str
 # --------------------------------------------------------
+
+@router.post("/chat/stream")
+async def chat_with_ai_stream(request: ChatRequest, db: Session = Depends(get_db)):
+    """
+    【V2.0 新增】流式对话接口 (Server-Sent Events)
+    """
+    # 1. 保存用户的消息到数据库
+    user_msg = models.ChatMessage(role="user", content=request.message)
+    db.add(user_msg)
+    db.commit()
+    
+    # 2. 获取历史记录作为上下文
+    history_records = db.query(models.ChatMessage).order_by(models.ChatMessage.id.desc()).limit(10).all()
+    history_records.reverse()
+    history = [{"role": msg.role, "content": msg.content} for msg in history_records[:-1]]
+
+    # 3. 构造流式生成器函数
+    async def event_generator():
+        full_reply = ""
+        # 逐块接收 AI 吐出来的字
+        async for chunk in generate_ai_response_stream(request.message, history, request.system_prompt):
+            full_reply += chunk
+            yield chunk  # 立刻把这个字发送给前端
+            
+        # 4. 当流式输出完全结束后，我们才得到完整的句子，这时把它存入数据库
+        if full_reply:
+            assistant_msg = models.ChatMessage(role="assistant", content=full_reply)
+            db.add(assistant_msg)
+            db.commit()
+
+    # 使用 StreamingResponse 返回流式数据
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db)):

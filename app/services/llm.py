@@ -12,6 +12,42 @@ client = AsyncOpenAI(
     base_url=settings.OPENAI_BASE_URL
 )
 
+async def generate_ai_response_stream(prompt: str, history: list = None, system_prompt: str = None):
+    """
+    【V2.0 新增】流式调用大模型获取回复 (打字机效果)
+    :param prompt: 用户当前的输入
+    :param history: 历史对话记录
+    :param system_prompt: 系统角色设定
+    """
+    messages = []
+    
+    # 1. 注入灵魂：如果有系统提示词，强制放在对话的最开始
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+        
+    # 2. 拼接历史记录和当前问题
+    messages.extend(history or [])
+    messages.append({"role": "user", "content": prompt})
+
+    try:
+        # 发起流式请求 (stream=True)
+        response = await client.chat.completions.create(
+            model=settings.MODEL_NAME,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=2000,
+            stream=True  # 核心参数：开启流式传输
+        )
+        
+        # 异步遍历模型返回的数据块 (chunks)
+        async for chunk in response:
+            # 提取每个 chunk 里的文字增量并 yield (产出) 出去
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+    except Exception as e:
+        yield f"\n\n[⚠️ AI 调用出错: {str(e)}]"
+
+# 保留原有的非流式方法，兼容老接口
 async def generate_ai_response(prompt: str, history: list = None) -> str:
     """
     调用大模型获取回复
