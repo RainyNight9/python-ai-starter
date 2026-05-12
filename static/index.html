@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的 AI 平台</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .chat-container { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; height: 80vh; }
+        .header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .header h2 { margin: 0; color: #333; }
+        .clear-btn { padding: 8px 15px; background: #ff4d4f; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .message { max-width: 80%; padding: 12px 16px; border-radius: 8px; line-height: 1.5; word-wrap: break-word; white-space: pre-wrap; }
+        .user { background: #007aff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .assistant { background: #f0f0f0; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .input-area { padding: 20px; border-top: 1px solid #eee; display: flex; gap: 10px; }
+        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px; outline: none; font-size: 16px; }
+        input[type="text"]:focus { border-color: #007aff; }
+        button.send { padding: 12px 25px; background: #007aff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button.send:disabled { background: #ccc; }
+        .loading { font-size: 12px; color: #666; align-self: flex-start; margin-left: 10px; display: none; padding: 10px 20px; }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="header">
+        <h2>🤖 专属 AI 助手</h2>
+        <button class="clear-btn" onclick="clearHistory()">清空历史</button>
+    </div>
+    <div class="messages" id="messages">
+        <!-- 消息将会渲染在这里 -->
+    </div>
+    <div class="loading" id="loading">AI 正在思考...</div>
+    <div class="input-area">
+        <input type="text" id="userInput" placeholder="输入你想对 AI 说的话..." onkeypress="handleKeyPress(event)">
+        <button class="send" id="sendBtn" onclick="sendMessage()">发送</button>
+    </div>
+</div>
+
+<script>
+    // 后端 API 基础路径，因为页面和接口同源，所以用相对路径即可
+    const API_BASE = '/api';
+    
+    // 获取 DOM 元素
+    const messagesDiv = document.getElementById('messages');
+    const loadingDiv = document.getElementById('loading');
+    const userInput = document.getElementById('userInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    // 页面加载完成后，自动拉取历史聊天记录
+    window.onload = async () => {
+        try {
+            // fetch 默认是 GET 请求
+            const res = await fetch(`${API_BASE}/history`);
+            const history = await res.json();
+            // 遍历历史记录并渲染到页面上
+            history.forEach(msg => appendMessage(msg.role, msg.content));
+            scrollToBottom();
+        } catch (e) {
+            console.error("加载历史记录失败", e);
+        }
+    };
+
+    // 封装一个渲染消息气泡的函数
+    function appendMessage(role, content) {
+        const div = document.createElement('div');
+        div.className = `message ${role}`; // 根据 role 添加 user 还是 assistant 的样式类
+        div.textContent = content;         // 使用 textContent 防范 XSS 注入攻击
+        messagesDiv.appendChild(div);
+        scrollToBottom();
+    }
+
+    // 保持滚动条永远在最底部，看最新消息
+    function scrollToBottom() {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // 核心函数：发送消息给后端
+    async function sendMessage() {
+        const text = userInput.value.trim();
+        if (!text) return;
+
+        // 1. 先把用户的消息显示在界面上
+        appendMessage('user', text);
+        
+        // 2. 清空输入框，并禁用按钮防止重复点击
+        userInput.value = '';
+        userInput.disabled = true;
+        sendBtn.disabled = true;
+        loadingDiv.style.display = 'block'; // 显示 "AI正在思考"
+        scrollToBottom();
+
+        try {
+            // 3. 发送 POST 请求给后端的 /chat 接口
+            const res = await fetch(`${API_BASE}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text }) // 转换为 JSON 字符串
+            });
+            const data = await res.json();
+            
+            // 4. 把后端返回的 AI 结果显示在界面上
+            appendMessage('assistant', data.reply);
+        } catch (e) {
+            appendMessage('assistant', '⚠️ 发送失败，请检查后端服务是否正常。');
+        } finally {
+            // 5. 不论成功还是失败，最后都要恢复输入框和按钮的状态
+            userInput.disabled = false;
+            sendBtn.disabled = false;
+            loadingDiv.style.display = 'none';
+            userInput.focus(); // 自动让输入框获取焦点
+            scrollToBottom();
+        }
+    }
+
+    // 监听回车键发送
+    function handleKeyPress(e) {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    }
+
+    // 清空历史记录功能
+    async function clearHistory() {
+        if (!confirm('确定要清空聊天记录吗？')) return;
+        try {
+            await fetch(`${API_BASE}/history`, { method: 'DELETE' });
+            messagesDiv.innerHTML = ''; // 清空页面上的消息列表
+        } catch (e) {
+            alert('清空失败');
+        }
+    }
+</script>
+</body>
+</html>
