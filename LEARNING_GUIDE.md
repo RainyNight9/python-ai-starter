@@ -1,132 +1,289 @@
-# 📖 Python AI 平台 - 源码学习指南
+# Python AI Starter 零基础学习手册（v3.1）
 
-本文档是对本项目的深度拆解，旨在帮助你更好地理解代码逻辑。  
-我们在主要的 `.py` 和 `.html` 源码文件中添加了**中文注释**，建议对照本指南阅读源码。
+本文档面向**几乎没有 Python 或 AI 工程经验**的读者：先用白话讲清「Python 你要会什么」「AI 概念是什么」，再按**当前仓库真实代码（v3.1）**把整条链路讲透。阅读时建议打开对应 `.py` / `static/index.html` 对照源码中的中文注释。
 
-**版本说明**：以下内容以当前仓库 **v3.0** 行为为准（流式对话、系统提示词、Token 历史、RAG 上传与检索）；若你本地代码较旧，请先与远程仓库同步。
+**v3.1 相对 v3.0 的变化**：在保留「流式对话 + 系统提示词 + Token 历史 + RAG」的基础上，新增 **Agent 模式**（`POST /api/chat/agent`）：模型可通过 **工具调用（Function Calling）** 让后端执行计算器、服务器时间、字符串反转等演示工具，并返回 **`steps` 轨迹**便于学习；前端增加「Agent 模式」勾选框。
 
 ---
 
-## 一、技术栈全景图
+## 如何使用本手册
 
-本项目采用轻量级、易本地跑通的现代 Web + AI 栈：
+| 你的情况 | 建议读法 |
+|----------|----------|
+| 完全新手 | 按顺序从「第一部分」读到「第五部分」，再动手跑 README 里的启动命令。 |
+| 会一点 Python | 可跳过第一部分部分小节，从第二部分 AI 概念开始。 |
+| 只想查接口/文件 | 直接看「第七部分 接口一览」「第六部分 关键文件索引」。 |
+
+---
+
+## 第一部分：读本项目前，你需要哪些 Python 基础
+
+### 1.1 Python 是什么
+
+Python 是一门**解释型**编程语言：你把代码写在 `.py` 文件里，用 `python` 命令运行，解释器**一行行执行**。本项目要求 **Python 3.8+**（见 `README.md`）。
+
+### 1.2 虚拟环境与依赖
+
+- **虚拟环境（venv）**：把当前项目的第三方包装在独立目录里，避免和系统里其他项目冲突。  
+  典型命令：`python -m venv venv`，然后 `source venv/bin/activate`（Mac/Linux）。
+- **pip**：安装依赖的工具。本项目依赖写在 `requirements.txt`，执行 `pip install -r requirements.txt`。
+
+### 1.3 本项目会遇到的语法（速查）
+
+**变量与基础类型**
+
+```python
+name = "Alice"      # 字符串 str
+count = 3           # 整数 int
+ratio = 0.5         # 浮点数 float
+items = [1, 2, 3]   # 列表 list：有序，可重复，用下标 items[0]
+user = {"role": "user", "content": "你好"}  # 字典 dict：键值对，用 user["role"]
+```
+
+**函数与返回值**
+
+```python
+def add(a: int, b: int) -> int:
+    return a + b
+```
+
+`-> int` 是**类型提示**，帮助 IDE 检查错误，运行时不强制。
+
+**异步 `async` / `await`（本项目核心）**
+
+- 在 **FastAPI** 里，很多接口处理函数写成 `async def`，里面用 `await` 等待网络 I/O（例如等大模型 API 返回），这样**同一线程**可以在等待时去处理其他请求，**并发**更好。
+- 规则很简单：在 `async def` 里，遇到「可能要等一会儿」的异步函数，前面加 `await`。
+- 本项目中：`generate_ai_response_stream`、`run_tool_agent`、`chat_with_ai_stream` 等都涉及异步。
+
+**导入模块**
+
+```python
+from app.core.config import settings   # 从包 app.core.config 导入对象 settings
+```
+
+`app` 是源码包，运行时要保证在项目根目录执行 `uvicorn app.main:app`，这样 Python 才能找到 `app`。
+
+**列表与字典的组合（对话历史）**
+
+大模型 API 普遍使用「消息列表」：
+
+```python
+messages = [
+    {"role": "system", "content": "你是助手"},
+    {"role": "user", "content": "1+1=?"},
+]
+```
+
+本项目里 `history`、 `messages` 大量出现这种结构。
+
+---
+
+## 第二部分：AI 与大模型相关概念（白话）
+
+### 2.1 大模型（LLM）在做什么
+
+可以把 **大语言模型** 想象成一个**读过海量文本的预测机器**：根据你给的上下文，**预测下一个词**（实际是多 token），连起来就是一句完整回复。它**不会天然记住**你的上传文件或昨天聊过什么——除非你把内容**再次放进本次请求**里。
+
+### 2.2 本项目如何「跟模型说话」
+
+我们通过 **兼容 OpenAI 的 Chat Completions HTTP API**（用官方 `openai` 库里的 `AsyncOpenAI`）把 `messages` 发给网关，网关再转发给具体模型。网关地址由环境变量 **`OPENAI_BASE_URL`** 决定，模型名由 **`MODEL_NAME`** 决定。
+
+### 2.3 消息里的 `role`：system / user / assistant / tool
+
+| 角色 | 含义 |
+|------|------|
+| `system` | 系统级说明：人设、规则、注入的知识摘要等。 |
+| `user` | 用户说的话。 |
+| `assistant` | 模型上一轮或历史轮次的回复。 |
+| `tool` | **仅在有工具调用时出现**：后端把工具执行结果以该角色发回模型，让模型继续推理。 |
+
+### 2.4 流式 vs 非流式
+
+- **非流式**：一次 HTTP 响应返回**整段**答案，等待时间长，但实现简单。  
+- **流式（stream）**：服务器边生成边推**小块文本**，前端边收边显示「打字机效果」，首字更快。  
+  本仓库默认聊天走 **`POST /api/chat/stream`**，响应类型为 `text/event-stream`；前端用 `fetch` + `ReadableStream` 读字节流（**不是**浏览器 `EventSource` 解析标准 SSE 帧）。
+
+### 2.5 Token 与历史截断
+
+模型一次能看的上下文长度有限，且通常按 **Token**（可理解为「词块」）计费。本项目用 **tiktoken**（`cl100k_base`）估算历史消息的 Token 数，在流式与 Agent 路径中把历史限制在约 **`MAX_HISTORY_TOKENS = 2000`** 以内（见 `app/api/endpoints.py`）。  
+非流式的旧接口 **`POST /api/chat`** 仍用「最近 10 条」简化策略，**便于对比学习**。
+
+### 2.6 RAG（检索增强生成）是什么
+
+**RAG** = 先把文档切成小块 → 用 **Embedding 模型**把每块变成向量 → 存进 **向量库**；用户提问时，把问题也变成向量，做**相似度检索**，把最相关的几段文字取出来，**拼进 system 侧说明**里再让模型回答。  
+这样模型「看到」了文档内容，而不是凭空编造。本仓库向量库为本地 **FAISS**（目录 `app/rag/vectorstore/`），Embedding 走 **DashScope HTTP API**（与聊天共用配置项 `OPENAI_API_KEY` 作为 Bearer，详见 `app/rag/document_processor.py` 注释）。
+
+### 2.7 Agent 与工具调用（Function Calling）是什么
+
+**普通聊天**：模型只能输出文本，**不能**真的在你电脑上运行代码。  
+**Agent（工具调用）**：我们把一组**工具定义**（名字、描述、参数 JSON Schema）随请求发给模型；模型若判断「需要算一下 / 查一下时间」，会返回 **`tool_calls`**；**后端**根据名字执行对应 Python 函数，把**字符串结果**以 `role="tool"` 的消息发回；模型再读结果，决定继续调工具还是给出最终自然语言答案。  
+本仓库的编排逻辑在 **`app/services/agent_service.py`**，工具声明在 **`app/agent/tool_definitions.py`**，实现在 **`app/agent/tools.py`**。
+
+---
+
+## 第三部分：技术栈与目录结构（对照仓库）
 
 | 层级 | 技术 | 作用 |
 |------|------|------|
-| Web 框架 | **FastAPI** | 异步友好，适合 AI 接口与流式响应。 |
-| ORM / 数据库 | **SQLAlchemy** + **SQLite** | 聊天记录持久化，零配置本地文件库。 |
-| 聊天模型 | **OpenAI Python SDK**（`AsyncOpenAI`） | 调用兼容 OpenAI Chat Completions 的网关（由 `OPENAI_BASE_URL` 决定）。 |
-| RAG | **LangChain**（`langchain_community` 等）+ **FAISS**（`faiss-cpu`） | 文档加载、切块、本地向量索引与相似度检索。 |
-| 向量化（Embedding） | **DashScope HTTP API** + **`requests`** | 将文本转为向量；实现见 `app/rag/document_processor.py`。Bearer 与聊天客户端**共用**配置项 `OPENAI_API_KEY`（未单独拆分「向量专用 Key」）。 |
-| 历史 Token 估算 | **tiktoken**（`cl100k_base`） | 在流式对话路径中控制上下文长度，见 `app/api/endpoints.py`。 |
-| 前端 | **单文件 HTML/CSS/JS** | 无构建步骤，便于理解请求与流式渲染。 |
+| Web | **FastAPI** | 提供 REST API、依赖注入、异步路由。 |
+| 数据库 | **SQLAlchemy** + **SQLite** | 表 `chat_messages` 存 user/assistant 文本。 |
+| 聊天 | **OpenAI Python SDK**（`AsyncOpenAI`） | 调用兼容 OpenAI 的 Chat Completions。 |
+| RAG | **LangChain** 组件 + **FAISS** | 加载 PDF/TXT、切块、向量索引与检索。 |
+| Embedding | **DashScope**（`requests` 调用） | 文本转向量。 |
+| 历史长度 | **tiktoken** | Token 估算。 |
+| 前端 | **单文件** `static/index.html` | 无构建步骤；流式 + Agent 双路径。 |
+
+**建议目录心智模型**
+
+```
+app/
+  main.py              # 入口：建表、CORS、挂载 /api 与 static
+  core/config.py       # 环境变量与 settings
+  api/endpoints.py     # 所有 HTTP 接口
+  services/llm.py      # 纯聊天：流式 / 非流式
+  services/agent_service.py  # Agent 多轮工具循环
+  agent/               # 工具声明 + 实现
+  db/                  # SQLite 连接与 ORM 模型
+  rag/document_processor.py    # RAG 入库与检索
+static/index.html      # 页面
+uploads/               # 上传的原始文件
+ai_platform.db         # SQLite 数据库文件（默认路径）
+```
 
 ---
 
-## 二、项目核心流程解析（与当前前端一致）
+## 第四部分：v3.1 已实现能力总览
 
-默认页面加载后，**发送消息**走的是 **`POST /api/chat/stream`**，并会带上 **系统提示词**；若已上传文档并完成向量化，同一路径会 **自动做 RAG 检索**。下面按时间顺序说明。
+| 能力 | 说明 |
+|------|------|
+| **流式对话** | `POST /api/chat/stream`；`llm.generate_ai_response_stream`；前端默认路径。 |
+| **系统提示词** | 请求体 `system_prompt`；与 RAG 拼接后的内容一并作为 system 发给模型。 |
+| **Token 历史** | 流式与 Agent 路径均按 Token 从近到远截取历史（上限约 2000 tokens）。 |
+| **RAG** | `POST /api/upload` 上传 PDF/TXT → 切块 → DashScope Embedding → FAISS；对话前 `retrieve_relevant_context`。 |
+| **非流式简化接口** | `POST /api/chat`：最近 10 条、**无** `system_prompt`、**无** RAG。 |
+| **Agent + 工具** | `POST /api/chat/agent`：Function Calling 多轮；返回 `reply` + `steps`；可与 RAG 并存；落库仍为 user/assistant 各一条（不存 tool 中间消息）。 |
+| **历史 API** | `GET /api/history`、`DELETE /api/history`。 |
 
-### 步骤 1：前端发起请求 (`static/index.html`)
+**前端行为（`static/index.html`）**
 
-1. 用户点击发送，执行 `sendMessage()`。
-2. 读取输入框与 **「角色设定 (System Prompt)」**，组装 JSON：`{ "message": "...", "system_prompt": "..." }`（`system_prompt` 可为空字符串）。
-3. 使用 `fetch('POST', '/api/chat/stream', ...)` 发起请求。
-4. 使用 `res.body.getReader()` 与 `TextDecoder` **逐块读取响应体**，拼接到新建的助手气泡中（打字机效果）。
-
-> **说明**：路由层使用 `StreamingResponse` 且 `media_type` 为 `text/event-stream`；生成器按块 `yield` 模型输出的**原始文本片段**。前端按字节流解码拼接即可，**未使用**浏览器 `EventSource` 解析标准 SSE `data:` 帧格式。
-
-### 步骤 2：后端接收与校验 (`app/api/endpoints.py`)
-
-1. 进入 `chat_with_ai_stream`，FastAPI 用 Pydantic 模型 **`ChatRequest`** 校验 JSON（`message` 必填，`system_prompt` 默认 `""`）。
-2. `db: Session = Depends(get_db)` 注入数据库会话。
-
-### 步骤 3：写入用户消息
-
-1. 构造 `models.ChatMessage(role="user", content=request.message)`，`db.add` 后 `commit`。
-
-### 步骤 4：RAG 检索（若有向量库）
-
-1. 调用 `retrieve_relevant_context(request.message)`（定义在 `app/rag/document_processor.py`）。
-2. 若 `app/rag/vectorstore` 目录不存在（尚未上传过文档），返回空字符串，对话行为与「无知识库」一致。
-3. 若有检索结果，将其拼接到 **`final_system_prompt`** 末尾（带「请基于以下参考资料…」等说明），再与请求里的 `system_prompt` 合并。
-
-### 步骤 5：组装历史上下文（Token 截断）
-
-1. 查询全部 `ChatMessage`，按 `id` **降序**取出（最新在前）。
-2. **跳过第一条**：即刚写入的当前用户消息，从更早的消息开始累加。
-3. 对每条历史调用 `get_messages_token_count`（基于 **tiktoken `cl100k_base`**），在不超过 **`MAX_HISTORY_TOKENS`（代码中为 2000）** 的前提下从近到远追加；再 **反转为时间正序**，得到 `history` 列表。
-4. 将 `history` 与当前用户句一起交给 `generate_ai_response_stream`（当前句在 `llm.py` 里再次作为最后一条 `user` 消息追加，与历史拼接方式以源码为准）。
-
-> **与固定「最近 10 条」的区别**：非流式接口 `POST /api/chat` 仍使用「最近 10 条」逻辑，**且不调用 RAG**、不使用请求体中的 `system_prompt`。这是刻意保留的简化路径，便于对比学习。
-
-### 步骤 6：流式调用大模型 (`app/services/llm.py`)
-
-1. `generate_ai_response_stream` 组装 `messages`：**若有 `system_prompt`（已含 RAG 拼接结果）则放在最前**，再 `extend(history)`，最后追加当前用户 `user` 消息。
-2. `await client.chat.completions.create(..., stream=True)`，`async for chunk` 解析 `delta.content` 并 `yield` 给上层。
-
-### 步骤 7：流结束后的持久化
-
-1. `endpoints.py` 中 `event_generator` 在流式迭代结束后，将完整回复写入 **`ChatMessage(role="assistant", ...)`** 并 `commit`。
-
-### 步骤 8：上传知识库（可选路径）
-
-1. 用户选择 PDF 或 TXT，前端 `POST /api/upload`，`multipart/form-data` 字段名 **`file`**。
-2. 后端保存到 `uploads/`，调用 `process_and_store_document`：加载 → **RecursiveCharacterTextSplitter** 切块 → **DashScopeEmbeddings** 向量化 → **FAISS** 写入或合并到 `app/rag/vectorstore` 目录。
-
-### 步骤 9：历史列表与清空
-
-1. **`GET /api/history`**：按 `id` 升序返回全部消息，供页面初次渲染。
-2. **`DELETE /api/history`**：删除表中所有聊天行（**不删除**已上传文件与向量库；若需「清空知识库」需另行实现或手动删目录）。
+- 未勾选 **Agent 模式**：`POST /api/chat/stream`（流式 + RAG）。  
+- 勾选 **Agent 模式**：`POST /api/chat/agent`（非流式 JSON）；界面展示可折叠的 **`steps`** 便于对照学习。
 
 ---
 
-## 三、行业延伸：上下文与记忆（与代码对照）
+## 第五部分：从请求到响应的完整路径
 
-当前流式路径已实现 **「滑动窗口 + Token 计数」** 的一种形式（按条累加直至超过阈值）。更进阶的做法仍可扩展：
+### 5.1 路径 A：默认流式聊天（含 RAG 与 Token 历史）
 
-1. **按模型真实上下文上限调参**：将 `MAX_HISTORY_TOKENS` 与所用聊天模型的窗口、预留输出 Token 一并考虑。  
-2. **对话摘要**：历史过长时用廉价模型生成摘要，以 system 或单独消息注入。  
-3. **长期记忆 RAG**：把历史对话也 embedding 入库，按问题检索相关旧话（与本仓库「文档 RAG」可并存为不同集合）。
+1. 用户在前端输入并发送 → `sendMessage()` → `fetch('/api/chat/stream', { message, system_prompt })`。  
+2. **`chat_with_ai_stream`**（`endpoints.py`）：校验 `ChatRequest` → 写入 user 消息到 SQLite。  
+3. **`retrieve_relevant_context`**：若有向量库则检索，把结果拼到 `final_system_prompt`。  
+4. 从数据库按 id 倒序取历史，**跳过刚写入的当前 user**，按条累加 Token，不超过上限后反转为时间正序 → `history`。  
+5. **`generate_ai_response_stream`**（`llm.py`）：`messages = [system?] + history + 当前 user`。  
+6. `AsyncOpenAI.chat.completions.create(..., stream=True)`，`async for chunk` 把 `delta.content` 逐块 `yield`。  
+7. `StreamingResponse` 把 chunk 写给浏览器；生成器结束后将**完整拼接**的 assistant 文本写入数据库。
 
-详见 `app/api/endpoints.py` 中 `get_messages_token_count` 与循环截断逻辑。
+### 5.2 路径 B：Agent 模式（工具调用 + steps）
 
----
+1. 前端勾选 Agent → `POST /api/chat/agent`，请求体同样是 `ChatRequest`。  
+2. 与流式路径一致：写 user → RAG 检索拼 system → **相同** Token 历史策略得到 `history`。  
+3. **`run_tool_agent`**（`agent_service.py`）：组装 `messages`，附带 **`tools=get_openai_style_tools()`**，`tool_choice="auto"`。  
+4. 若响应含 **`tool_calls`**：把 assistant 消息（含 `tool_calls`）追加到 `messages`，对每个调用 **`dispatch_tool_call`**（`tools.py`），将 `role="tool"` 的结果追加，再请求模型，最多 **`_MAX_AGENT_TOOL_ROUNDS = 8`** 轮。  
+5. 若无 `tool_calls`：取 `content` 为最终 `reply`，同时累积 **`trace`**（`model_tool_calls` / `tool_result` / `model_final` / `agent_abort` 等）。  
+6. 返回 **`AgentChatResponse(reply, steps)`**；`endpoints` 将 `reply` 作为 assistant 落库。  
+7. **注意**：中间 tool 轮次**不写入** SQLite，避免把「过程」当成用户可见对话。
 
-## 四、推荐的源码阅读顺序
+### 5.3 路径 C：上传文档（RAG 入库）
 
-建议按以下顺序打开文件（**结合文件内注释**）：
+1. 前端 `FormData` 字段名 **`file`** → `POST /api/upload`。  
+2. 保存到 `uploads/`，调用 **`process_and_store_document`**：加载 PDF/TXT → **RecursiveCharacterTextSplitter** 切块 → DashScope 批量 Embedding → **FAISS** 写入或合并 `app/rag/vectorstore/`。
 
-1. **`app/main.py`**：应用创建、CORS、`/api` 路由、静态资源挂载。  
-2. **`app/core/config.py`**：环境变量与默认值（含 `EMBEDDING_MODEL`）。  
-3. **`app/db/database.py`** 与 **`app/db/models.py`**：引擎、`get_db`、`ChatMessage` 表结构。  
-4. **`app/api/endpoints.py`**：`ChatRequest` / `ChatResponse`；**重点** `chat_with_ai_stream`、`upload_document`；对照 `chat_with_ai`（非流式）。  
-5. **`app/services/llm.py`**：流式与非流式 Chat Completions。  
-6. **`app/rag/document_processor.py`**：Embedding、切块、FAISS 入库与 `retrieve_relevant_context`。  
-7. **`static/index.html`**：系统提示词、上传、流式 `fetch`、历史加载与清空。
+### 5.4 路径 D：非流式简化 `/api/chat`
 
----
-
-## 五、开发工具推荐：查看 SQLite 数据库
-
-项目使用 SQLite，数据文件为项目根目录下的 **`ai_platform.db`**（由 `DATABASE_URL` 配置）。
-
-在 VS Code 等编辑器中查看表数据，可安装轻量插件（例如搜索 **SQLite Viewer**），在资源管理器中单击 `ai_platform.db` 以表格方式浏览 **`chat_messages`** 表。
-
-向量数据不在 SQLite 中，而在 **`app/rag/vectorstore/`** 目录（FAISS 本地文件）；上传的原始文件在 **`uploads/`**。
+写 user → 取最近 10 条 → 构造 history（去掉最后一条当前 user）→ **`generate_ai_response`**（无 system、无 RAG）→ 写 assistant → 返回 `ChatResponse`。
 
 ---
 
-## 六、接口一览（便于你对照抓包或写客户端）
+## 第六部分：内置工具与安全设计（学习 Agent 必读）
+
+声明见 **`app/agent/tool_definitions.py`**，实现见 **`app/agent/tools.py`**：
+
+| 工具名 | 作用 | 实现要点 |
+|--------|------|----------|
+| `calculate` | 数学表达式求值 | **禁止 `eval`**：用 `ast` 解析 + 白名单运算符，正则限制字符集。 |
+| `get_server_time` | 返回服务器本地时间 ISO 字符串 | `timezone_hint` 为教学占位，**未做**完整时区换算。 |
+| `reverse_text` | 字符串反转 | 演示非数学类工具。 |
+
+**安全原则**：模型生成的参数会在你的服务器上执行——必须校验、限长、避免任意代码执行与路径遍历；扩展工具时沿用此思路。
+
+---
+
+## 第七部分：HTTP 接口一览
 
 | 方法 | 路径 | 作用 |
 |------|------|------|
-| `POST` | `/api/chat/stream` | 流式对话；支持 `system_prompt`；内置 RAG 检索；历史按 Token 截断。 |
-| `POST` | `/api/chat` | 非流式对话；最近 10 条历史；无 RAG；无请求体 `system_prompt`。 |
+| `POST` | `/api/chat/stream` | 流式对话；`system_prompt`；RAG；Token 截断历史。 |
+| `POST` | `/api/chat/agent` | 非流式 Agent；`system_prompt`；RAG；同策略历史；返回 `reply` + `steps`。 |
+| `POST` | `/api/chat` | 非流式；最近 10 条；无 RAG；请求体中的 `system_prompt` 不使用。 |
 | `POST` | `/api/upload` | 上传 PDF/TXT，解析并向量化入库。 |
-| `GET` | `/api/history` | 返回全部聊天消息。 |
-| `DELETE` | `/api/history` | 清空聊天消息表。 |
+| `GET` | `/api/history` | 全部聊天消息。 |
+| `DELETE` | `/api/history` | 清空聊天表（不删向量库与 `uploads/`）。 |
 
 ---
 
-祝你学习愉快。看不懂的地方可以把具体文件与行号发给 AI 助手，请它结合本指南讲解。
+## 第八部分：配置与环境变量
+
+复制 `.env.example` 为 `.env`，至少关注：
+
+- **`OPENAI_API_KEY`**：聊天客户端鉴权；RAG 的 DashScope Embedding 也用它作 Bearer（变量名历史原因，含义是「Bearer Token」）。若既要聊天又要 RAG，需保证该 Key 对**两边**都可用，或按 README 说明改用同一兼容网关。  
+- **`OPENAI_BASE_URL`**、**`MODEL_NAME`**：聊天网关与模型名。  
+- **`EMBEDDING_MODEL`**：如 `text-embedding-v3`，与 DashScope 文档一致。  
+- **`DATABASE_URL`**：默认 `sqlite:///./ai_platform.db`（见 `config.py`）。
+
+**Agent 额外要求**：你的网关与模型需支持 **`tools` / `tool_calls`**；若不支持，调用会报错，此时可仅用流式接口或更换模型。
+
+---
+
+## 第九部分：推荐源码阅读顺序
+
+1. `app/main.py`：应用创建、CORS、`/api`、静态目录。  
+2. `app/core/config.py`：`Settings` 与环境变量。  
+3. `app/db/database.py`、`app/db/models.py`：`get_db`、`ChatMessage`。  
+4. `app/api/endpoints.py`：重点 `chat_with_ai_stream`、`chat_with_ai_agent`、`upload_document`、`chat_with_ai`。  
+5. `app/services/llm.py`：流式与非流式 Chat Completions。  
+6. `app/services/agent_service.py`：工具循环与 trace。  
+7. `app/agent/tool_definitions.py`、`app/agent/tools.py`。  
+8. `app/rag/document_processor.py`：入库与检索。  
+9. `static/index.html`：Agent 勾选、流式 reader、`/upload`。
+
+---
+
+## 第十部分：调试与学习技巧
+
+- **浏览器开发者工具 → Network**：对比 `/api/chat/stream` 与 `/api/chat/agent` 的请求与响应体。  
+- **SQLite**：用 VS Code 插件等打开项目根目录 **`ai_platform.db`**，查看表 **`chat_messages`**。  
+- **向量文件**：在 **`app/rag/vectorstore/`**，不是数据库里的表。  
+- **对照学习**：同一问题分别用「仅流式」与「Agent」提问，观察 `steps` 里模型是否选择调用工具。
+
+---
+
+## 第十一部分：常见问题（与 README 互补）
+
+1. **RAG 似乎没用上**  
+   确认已上传成功、向量目录存在；对话走 **`/api/chat/stream`** 或 **`/api/chat/agent`**（两者都会 RAG）；`/api/chat` 不会 RAG。
+
+2. **Agent 报错 500**  
+   多为网关不支持 `tools` 或模型名错误；查看终端堆栈与 Network 响应。
+
+3. **`uvicorn` 找不到**  
+   使用 `python3 -m uvicorn app.main:app --reload`。
+
+---
+
+## 第十二部分：你还可以自己扩展的方向（本仓库未实现）
+
+- 多会话 `session_id`、流式 Agent、引用来源（页码/文件名）展示、删除/重建向量库、更多业务工具（HTTP 查询、数据库只读查询等）、对 `/api/chat` 与流式路径的能力对齐。
+
+---
+
+祝你学习顺利。若某段代码看不懂，把**文件路径 + 行号**发给助手，并说明「走的是流式还是 Agent」，排查会更快。
