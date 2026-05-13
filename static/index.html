@@ -111,7 +111,7 @@
         scrollToBottom();
 
         try {
-            // 3. 发送 POST 请求给后端的 /chat/stream 接口 (V2.0 流式接口)
+            // 3. 发送 POST 请求给后端的 /chat/stream（v3.0：流式 + 可选 RAG）
             const res = await fetch(`${API_BASE}/chat/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

@@ -5,17 +5,37 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![OpenAI Compatible](https://img.shields.io/badge/OpenAI-Compatible-412991.svg)](https://openai.com/)
 
-欢迎来到 **Python AI 全栈入门项目**！本项目专为你从 0 搭建自己的 AI 调用平台而设计，涵盖了“后端接口 + AI 调用 + 数据库存储 + 极简前端”。
+欢迎来到 **Python AI 全栈入门项目**！本项目专为你从 0 搭建自己的 AI 调用平台而设计，涵盖了「后端接口 + AI 调用 + 数据库存储 + 极简前端」。当前默认体验已对齐 **v3.0**：流式对话、系统提示词、基于 Token 的历史截断，以及 **RAG**（上传 PDF/TXT → 向量化入库 → 对话时检索拼入上下文）。
 
 通过这个项目，你将经历：**从工程入手 → 跑通 → 理解 → 升级 → 变成 AI 全栈** 的完整学习路径。
 
 ## 📑 目录 (Table of Contents)
+- [当前版本已实现能力 (v3.0)](#-当前版本已实现能力-v30)
 - [🟢 第一阶段：工程入手与跑通 (Run)](#-第一阶段工程入手与跑通-run)
 - [🔵 第二阶段：理解核心代码 (Understand)](#-第二阶段理解核心代码-understand)
-- [🟠 第三阶段：项目升级与魔改 (Upgrade)](#-第三阶段项目升级与魔改-upgrade)
+- [🟠 第三阶段：内置能力说明与仍可做的挑战 (Upgrade)](#-第三阶段内置能力说明与仍可做的挑战-upgrade)
 - [🔴 第四阶段：变成 AI 全栈 (Become Full-Stack)](#-第四阶段变成-ai-全栈-become-full-stack)
 - [🛠️ 常见问题与避坑指南 (Troubleshooting)](#-常见问题与避坑指南-troubleshooting)
 - [🤝 参与贡献 (Contributing)](#-参与贡献-contributing)
+
+---
+
+## ✨ 当前版本已实现能力 (v3.0)
+
+| 能力 | 说明 |
+|------|------|
+| **流式对话** | 前端默认调用 `POST /api/chat/stream`，用 `fetch` + `ReadableStream` 逐块显示回复。 |
+| **系统提示词** | 请求体字段 `system_prompt`；前端「角色设定」输入框对应此项。 |
+| **历史与 Token** | 流式接口内用 `tiktoken`（`cl100k_base`）控制历史消息总 Token，避免上下文过长。 |
+| **RAG** | `POST /api/upload` 上传 PDF/TXT → LangChain 切块 → **DashScope** Embedding → 本地 **FAISS** 索引；对话前 `retrieve_relevant_context` 检索片段并拼入系统侧说明。 |
+| **非流式兼容** | `POST /api/chat` 仍保留：固定取最近 10 条历史、**不**走 RAG、**不**带 `system_prompt`（便于对照「最小接口」与「完整能力」的差异）。 |
+| **历史 API** | `GET /api/history` 拉取全部消息；`DELETE /api/history` 清空聊天记录。 |
+
+**配置要点：**
+
+- 聊天模型：`OPENAI_BASE_URL`、`OPENAI_API_KEY`、`MODEL_NAME`（见 `app/core/config.py` 与 `.env.example`）。
+- RAG 向量化：当前实现通过 **DashScope** 的 HTTP Embedding API；**与聊天共用** `OPENAI_API_KEY` 作为 Bearer。启用 RAG 时请确认该 Key 对 DashScope Embedding 有效，并理解其与聊天网关是否为同一套凭证（详见上表与 `app/rag/document_processor.py` 内注释）。
+- 向量模型：`EMBEDDING_MODEL`（如 `text-embedding-v3`），见 `.env.example`。
 
 ---
 
@@ -39,70 +59,79 @@ pip install -r requirements.txt
    ```bash
    cp .env.example .env
    ```
-2. 打开 `.env` 文件，填入你的 OpenAI API Key（如果没有，也可以使用支持 OpenAI 格式的第三方中转 API Key）。
-   > *注意：如果你使用的是第三方中转 API，你可能还需要在 `app/services/llm.py` 中修改 `base_url` 参数。*
+2. 打开 `.env` 文件，至少配置：
+   - `OPENAI_API_KEY`：**同一变量**在代码中被两处使用——`AsyncOpenAI` 聊天鉴权，以及 RAG 里 DashScope Embedding 的 `Bearer`（见 `document_processor.py`）。因此在你**不改代码**的前提下，若既要 RAG 又要聊天，需保证该 Key 对 **两处服务** 都可用；常见做法是聊天与向量均走 **DashScope**（或同一兼容网关），或仅使用不需要 DashScope 的聊天路径且暂时不用 RAG。
+   - `OPENAI_BASE_URL`、`MODEL_NAME`：按你的聊天模型提供方填写。
+   - `EMBEDDING_MODEL`：使用 RAG 时，与 DashScope 文档一致即可（默认 `text-embedding-v3`）。
+   > 若你希望「聊天用 A 厂商 Key、向量用 B 厂商 Key」，需要把配置拆成两个环境变量并在代码里分别传入；当前仓库未拆分。
 
 ### 4. 启动服务
 ```bash
 uvicorn app.main:app --reload
 ```
-启动成功后，打开浏览器访问：[http://127.0.0.1:8000](http://127.0.0.1:8000)
-你就可以直接在极简前端页面中与你的 AI 助手聊天了！
+若终端找不到 `uvicorn`，可使用：
+```bash
+python3 -m uvicorn app.main:app --reload
+```
+
+启动成功后，打开浏览器访问：[http://127.0.0.1:8000](http://127.0.0.1:8000)  
+在页面中可设置角色、上传 PDF/TXT 后再对话（默认走流式接口）。
 
 ---
 
 ## 🔵 第二阶段：理解核心代码 (Understand)
 
-了解项目是怎么跑起来的，你需要看以下几个核心文件：
+了解项目是怎么跑起来的，建议按下面顺序阅读（更细的流程见 [LEARNING_GUIDE.md](LEARNING_GUIDE.md)）：
 
-1. **`app/main.py`** (程序入口)
-   - 它是整个 FastAPI 后端的启动文件。
-   - 负责挂载 API 路由 (`/api`) 和前端静态文件 (`static/index.html`)。
-2. **`app/services/llm.py`** (AI 大脑)
-   - 这里封装了与 OpenAI 通信的代码。
-   - 看看 `generate_ai_response` 函数，它是如何把用户的对话历史拼接起来发送给大模型的。
-3. **`app/db/`** (记忆系统)
-   - `models.py`: 定义了数据库长什么样（我们用 SQLite 存了 `role` 和 `content`）。
-   - `database.py`: 数据库的连接配置。
-4. **`app/api/endpoints.py`** (接口层)
-   - 这里是前端和后端的桥梁。
-   - 重点看 `@router.post("/chat")`：它接收前端的消息 -> 存入数据库 -> 读取历史 -> 调 AI -> 存入 AI 回复 -> 返回给前端。
-5. **`static/index.html`** (门面)
-   - 包含 HTML/CSS/JS 的单文件前端，展示了如何用 `fetch` 调用后端的 `/api/chat` 接口。
+1. **`app/main.py`**（程序入口）  
+   挂载 API（`/api`）、静态前端（`static/`）、CORS。
+
+2. **`app/core/config.py`**（配置）  
+   从环境变量读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`MODEL_NAME`、`EMBEDDING_MODEL` 等。
+
+3. **`app/services/llm.py`**（聊天模型调用）  
+   `generate_ai_response_stream`：流式 + `system_prompt` + `history`；`generate_ai_response`：非流式，供 `/api/chat` 使用。
+
+4. **`app/api/endpoints.py`**（HTTP 接口）  
+   - `POST /chat/stream`：存用户消息 → RAG 检索 → Token 截断历史 → 流式调模型 → 存助手回复。  
+   - `POST /upload`：保存上传文件并调用 RAG 入库。  
+   - `POST /chat`、`GET/DELETE /history`：见上表。
+
+5. **`app/rag/document_processor.py`**（RAG）  
+   文档加载、切块、DashScope Embedding、FAISS 本地持久化与相似度检索。
+
+6. **`app/db/`**（持久化）  
+   `models.py`：`ChatMessage`（`role`、`content`、`created_at`）；`database.py`：SQLite 与 Session。
+
+7. **`static/index.html`**（前端）  
+   系统提示词、上传、`fetch` 调用 `/api/chat/stream` 与 `/api/upload`，以及历史加载与清空。
 
 ---
 
-## 🟠 第三阶段：项目升级与魔改 (Upgrade)
+## 🟠 第三阶段：内置能力说明与仍可做的挑战 (Upgrade)
 
-现在的平台只是一个“雏形”，你可以尝试以下升级挑战来提升你的工程能力：
+下列能力 **已在当前代码中实现**，适合对照源码阅读，而不是从零重做一遍：
 
-### 挑战 1：换用开源模型 / 国内大模型
-- **目标**：不使用 OpenAI，改用国内大模型（如智谱、百川、DeepSeek）或本地部署的开源模型（Ollama）。
-- **做法**：修改 `app/services/llm.py`。大多数国内模型兼容 OpenAI SDK，你只需要改 `base_url` 和 `api_key`，以及 `model` 名称即可。
+- **流式输出**：`/api/chat/stream` + `llm.generate_ai_response_stream` + 前端 `ReadableStream`。
+- **系统提示词**：`ChatRequest.system_prompt`，流式链路全程使用。
+- **换模型 / 换网关**：改 `.env` 中的 `OPENAI_BASE_URL`、`MODEL_NAME`、`OPENAI_API_KEY`；无需改 `llm.py` 里的 URL（客户端从 `settings` 读取）。
 
-### 挑战 2：实现流式输出 (Streaming)
-- **目标**：像 ChatGPT 一样，让 AI 的回复一个字一个字地蹦出来，而不是转圈等半天。
-- **做法**：
-  1. 后端：在 `llm.py` 中开启 `stream=True`，并使用 FastAPI 的 `StreamingResponse` 返回异步生成器。
-  2. 前端：使用 `fetch` 的 `ReadableStream` 或者 `EventSource` (SSE) 接收数据并逐步渲染。
+你仍可尝试的 **进阶挑战**（仓库尚未实现或仅部分涉及）：
 
-### 挑战 3：给 AI 加上系统提示词 (System Prompt)
-- **目标**：让 AI 扮演特定角色（比如“毒舌程序员”、“翻译官”、“心理医生”）。
-- **做法**：在传给 AI 的 `messages` 列表的最前面，强行插入一条 `{"role": "system", "content": "你是一个资深 Python 工程师..."}`。
-
-### 挑战 4：多会话管理 (Sessions)
-- **目标**：现在所有人都在同一个聊天记录里，如何实现“新建对话”功能？
-- **做法**：在数据库模型 `ChatMessage` 中增加一个字段 `session_id`。前端生成一个 UUID，每次发消息带上这个 ID，后端按 ID 查询历史记录。
+1. **多会话 (Sessions)**：为 `ChatMessage` 增加 `session_id`（或会话表），前端按会话切换与隔离历史。  
+2. **统一两条聊天接口**：让 `/api/chat` 也支持 `system_prompt` 与 RAG，或明确在文档中保留「简化版 vs 完整版」的教学分工（当前为后者）。  
+3. **RAG 增强**：引用来源（文件名/页码）、删除与重建索引、rerank、混合检索等。  
+4. **Agent / 工具调用**：在对话链路外挂工具（搜索、天气、自定义 API 等）。
 
 ---
 
 ## 🔴 第四阶段：变成 AI 全栈 (Become Full-Stack)
 
-当你完成了上述挑战，恭喜你已经具备了 AI 后端工程师的基础！下一步的进阶方向：
+在掌握 v3.0 代码路径基础上，可继续深入：
 
-1. **RAG (检索增强生成)**：结合 LangChain / LlamaIndex 和向量数据库（如 Milvus, Chroma），让 AI 能够读取你的本地 PDF/Word 文档并回答问题。
-2. **Agent (智能体)**：给 AI 接入工具（如联网搜索、代码执行、调用外部 API 查询天气等），让 AI 帮你干活而不仅仅是聊天。
-3. **前端工程化**：抛弃单文件 HTML，使用 React/Vue/Next.js 等现代前端框架，结合 TailwindCSS，写出真正媲美 ChatGPT 官网的漂亮界面。
+1. **RAG 工程化**：更大规模的切片策略、评测集、幻觉与引用格式规范；向量库可对比 Chroma / Milvus 与当前 FAISS 本地方案的差异。  
+2. **Agent**：工具编排、Function Calling、多步规划与错误恢复。  
+3. **前端工程化**：在保留本仓库「单文件可读」的前提下，增加 React/Vue 等示例目录或独立小项目。
 
 ---
 
@@ -120,12 +149,15 @@ uvicorn app.main:app --reload
      ```
 
 ### 2. 终端提示 `zsh: command not found: uvicorn`
-- **原因**：当 `pip` 发现当前用户对全局 Python 环境没有写入权限时，会自动把包安装到用户独立的目录下（如 `~/.local/bin` 或 `~/Library/Python/3.14/bin`）。如果这个目录没有被配置到你的系统环境变量（PATH）里，终端就找不到 `uvicorn` 命令。
+- **原因**：当 `pip` 发现当前用户对全局 Python 环境没有写入权限时，会自动把包安装到用户独立的目录下（如 `~/.local/bin` 或 `~/Library/Python/3.14/bin`）。如果这个目录没有被配置到你的系统变量（PATH）里，终端就找不到 `uvicorn` 命令。
 - **解决办法**：
   不需要修改环境变量，直接通过 Python 模块的方式调用 Uvicorn 即可：
   ```bash
   python3 -m uvicorn app.main:app --reload
   ```
+
+### 3. RAG 上传成功但对话似乎「用不上文档」
+- **检查**：`OPENAI_API_KEY` 是否对 **DashScope Embedding** 请求有效（与聊天是否同一厂商需结合你的配置判断）；`app/rag/vectorstore` 是否在首次上传后生成；对话是否走 **`/api/chat/stream`**（当前前端默认走此接口才会注入检索结果）。非流式 `/api/chat` **不会**调用 RAG。
 
 ---
 
@@ -133,7 +165,7 @@ uvicorn app.main:app --reload
 
 作为一个开源的入门级项目，我们非常欢迎任何形式的贡献，包括但不限于：
 - 修复代码或文档中的错别字/Bug
-- 提交上述“第三阶段”升级挑战的实现代码（可以提交到 `examples/` 目录下）
+- 提交「第三阶段」进阶挑战的实现代码（可以提交到 `examples/` 目录下）
 - 优化前端界面的 UI
 
 **贡献流程：**
