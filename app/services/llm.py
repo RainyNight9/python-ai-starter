@@ -1,3 +1,14 @@
+"""
+app.services.llm —— 与大模型对话的最小封装层（不含 Agent / 工具循环）。
+
+学习路径建议：
+1. 先读本文件：理解「messages 如何组装」与「流式 chunk 如何解析」。
+2. 再读 app/services/agent_service.py：在 messages 之上叠加 tools 与多轮 tool 结果。
+
+本文件刻意保持「薄」：复杂业务（RAG、Token 截断、落库）放在 api/endpoints.py，
+避免所有逻辑堆在一处难以维护。
+"""
+
 from openai import AsyncOpenAI
 from app.core.config import settings
 
@@ -7,6 +18,7 @@ from app.core.config import settings
 
 # 初始化异步的 OpenAI 客户端 (AsyncOpenAI)
 # 相比同步版本，异步版本可以在等待 AI 返回结果时，让 FastAPI 去处理其他用户的请求，提高并发能力。
+# base_url 指向「兼容 OpenAI Chat Completions」的网关；模型名由 MODEL_NAME 控制。
 client = AsyncOpenAI(
     api_key=settings.OPENAI_API_KEY,
     base_url=settings.OPENAI_BASE_URL
@@ -19,18 +31,23 @@ async def generate_ai_response_stream(prompt: str, history: list = None, system_
     :param history: 历史对话记录
     :param system_prompt: 系统角色设定
     """
+    # messages 的顺序很重要：system 永远在最前；接着是「已发生的对话」；
+    # 最后是本轮 user。模型会基于整段上下文续写 assistant。
     messages = []
-    
+
     # 1. 注入灵魂：如果有系统提示词，强制放在对话的最开始
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-        
+
     # 2. 拼接历史记录和当前问题
+    # history 元素形如 {"role":"user"|"assistant","content":"..."}，由上层 endpoints 负责截断。
     messages.extend(history or [])
     messages.append({"role": "user", "content": prompt})
 
     try:
         # 发起流式请求 (stream=True)
+        # 流式响应是一个异步迭代器：每收到一块网络数据就可能产出一个 chunk，
+        # 因此首字节更快，适合聊天 UI；代价是上层需要自行拼接完整答案用于落库。
         response = await client.chat.completions.create(
             model=settings.MODEL_NAME,
             messages=messages,

@@ -27,18 +27,27 @@
         button.send { padding: 12px 25px; background: #007aff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
         button.send:disabled { background: #ccc; }
         .loading { font-size: 12px; color: #666; align-self: flex-start; margin-left: 10px; display: none; padding: 10px 20px; }
+        .agent-bar { padding: 10px 20px; background: #f3e8ff; border-bottom: 1px solid #e9d5ff; font-size: 14px; display: flex; align-items: center; gap: 10px; }
+        .agent-bar label { cursor: pointer; user-select: none; color: #5b21b6; font-weight: 600; }
+        .agent-trace { margin-top: 8px; font-size: 12px; color: #555; }
+        .agent-trace summary { cursor: pointer; color: #6d28d9; }
     </style>
 </head>
 <body>
 
 <div class="chat-container">
     <div class="header">
-        <h2>🤖 专属 AI 助手 (V3.0 RAG)</h2>
+        <h2>🤖 专属 AI 助手 (V3.1 RAG + Agent)</h2>
         <button class="clear-btn" onclick="clearHistory()">清空历史</button>
     </div>
     <div class="system-config">
         <label>🎭 角色设定 (System Prompt):</label>
         <input type="text" id="sysPrompt" placeholder="例如：你是一个精通 Python 的资深架构师，说话非常毒舌但很专业。">
+    </div>
+    <!-- Agent 模式：走后端 /api/chat/agent，启用「工具调用」教学链路（非流式，一次返回完整 JSON） -->
+    <div class="agent-bar">
+        <input type="checkbox" id="agentMode">
+        <label for="agentMode">🧩 Agent 模式（工具调用：计算 / 时间 / 反转文本）</label>
     </div>
     <div class="upload-area">
         <label>📚 上传知识库 (仅限 PDF/TXT):</label>
@@ -111,36 +120,82 @@
         scrollToBottom();
 
         try {
-            // 3. 发送 POST 请求给后端的 /chat/stream（v3.0：流式 + 可选 RAG）
-            const res = await fetch(`${API_BASE}/chat/stream`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text, system_prompt: sysPrompt }) 
-            });
-            
-            // 隐藏 loading 动画
-            loadingDiv.style.display = 'none';
-            
-            // 4. 在界面上先创建一个空的 assistant 消息气泡，用来接收流式文字
-            const div = document.createElement('div');
-            div.className = 'message assistant';
-            messagesDiv.appendChild(div);
-            scrollToBottom();
-            
-            // 5. 开始解析流式数据
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder('utf-8');
-            
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break; // 数据读取完毕
-                
-                // 解码一块数据并追加到刚才创建的气泡中
-                div.textContent += decoder.decode(value, { stream: true });
+            const useAgent = document.getElementById('agentMode').checked;
+
+            if (useAgent) {
+                // ---------- Agent 路径：非流式，一次拿到 { reply, steps } ----------
+                // 学习要点：这与流式路径不同——浏览器会等整个 HTTP 响应结束后再渲染。
+                const res = await fetch(`${API_BASE}/chat/agent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text, system_prompt: sysPrompt })
+                });
+                loadingDiv.style.display = 'none';
+
+                if (!res.ok) {
+                    let errText = `HTTP ${res.status}`;
+                    try {
+                        const errJson = await res.json();
+                        errText = errJson.detail || errText;
+                    } catch (_) { /* 非 JSON 错误体时忽略 */ }
+                    throw new Error(errText);
+                }
+
+                const data = await res.json();
+                const wrap = document.createElement('div');
+                wrap.className = 'message assistant';
+
+                // 主文本：模型的最终自然语言答案
+                const main = document.createElement('div');
+                main.textContent = data.reply || '';
+                wrap.appendChild(main);
+
+                // 可折叠轨迹：帮助你理解「模型在第几轮选择了哪些工具」
+                if (Array.isArray(data.steps) && data.steps.length) {
+                    const det = document.createElement('details');
+                    det.className = 'agent-trace';
+                    const sum = document.createElement('summary');
+                    sum.textContent = '查看 Agent 工具调用轨迹（教学用）';
+                    det.appendChild(sum);
+                    const pre = document.createElement('pre');
+                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.style.margin = '8px 0 0 0';
+                    pre.textContent = JSON.stringify(data.steps, null, 2);
+                    det.appendChild(pre);
+                    wrap.appendChild(det);
+                }
+
+                messagesDiv.appendChild(wrap);
                 scrollToBottom();
+            } else {
+                // ---------- 默认路径：流式 + 可选 RAG（v3.0 主链路） ----------
+                const res = await fetch(`${API_BASE}/chat/stream`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text, system_prompt: sysPrompt })
+                });
+
+                loadingDiv.style.display = 'none';
+
+                const div = document.createElement('div');
+                div.className = 'message assistant';
+                messagesDiv.appendChild(div);
+                scrollToBottom();
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    div.textContent += decoder.decode(value, { stream: true });
+                    scrollToBottom();
+                }
             }
         } catch (e) {
-            appendMessage('assistant', '⚠️ 发送失败，请检查后端服务是否正常。');
+            // 尽量把后端的错误信息透传出来，便于你对照网络面板与终端日志排查
+            const hint = (e && e.message) ? e.message : String(e);
+            appendMessage('assistant', '⚠️ 发送失败：' + hint);
         } finally {
             // 6. 不论成功还是失败，最后都要恢复输入框和按钮的状态
             userInput.disabled = false;

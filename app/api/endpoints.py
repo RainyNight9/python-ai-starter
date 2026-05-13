@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from typing import List
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List
 import tiktoken
 import os
 import shutil
@@ -10,6 +10,7 @@ import shutil
 from app.db.database import get_db
 from app.db import models
 from app.services.llm import generate_ai_response, generate_ai_response_stream
+from app.services.agent_service import run_tool_agent
 from app.rag.document_processor import process_and_store_document, retrieve_relevant_context
 
 # ==========================================
@@ -46,6 +47,20 @@ class MessageDTO(BaseModel):
     role: str
     content: str
     created_at: str
+
+
+class AgentChatResponse(BaseModel):
+    """
+    Agent 模式专用响应：除了最终自然语言 reply，还返回 steps 轨迹，
+    便于你在前端或学习笔记里对照「模型何时决定调用工具、参数是什么、
+    工具返回了什么（预览）」。
+    """
+
+    reply: str
+    # 使用 Field(default_factory=list) 而不是默认值 []，避免可变默认参数坑
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 # --------------------------------------------------------
 
 @router.post("/chat/stream")
@@ -108,6 +123,66 @@ async def chat_with_ai_stream(request: ChatRequest, db: Session = Depends(get_db
 
     # 使用 StreamingResponse 返回流式数据
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/chat/agent", response_model=AgentChatResponse)
+async def chat_with_ai_agent(request: ChatRequest, db: Session = Depends(get_db)):
+    """
+    【Agent 教学接口】非流式：在对话链路中启用「工具调用 / Function Calling」。
+
+    与普通 /chat/stream 的差异（学习时请对照思考）：
+    - /chat/stream：模型只能生成文本；知识来自 RAG 注入的 system 侧文字。
+    - /chat/agent：模型可多次请求后端工具（计算、时间、字符串处理等），
+      形成「推理 → 行动 → 再推理」的闭环；仍可将 RAG 拼进 system，二者可并存。
+
+    持久化策略：与普通聊天一致，最终仍写入 user / assistant 各一条，
+    不把 tool 中间消息写入 SQLite（那是「过程」，不是用户可见对话）。
+    """
+    # 1) 记录用户消息
+    user_msg = models.ChatMessage(role="user", content=request.message)
+    db.add(user_msg)
+    db.commit()
+
+    # 2) RAG：与流式接口保持一致，把检索结果并入 system，便于对比两种路径
+    relevant_context = retrieve_relevant_context(request.message)
+    final_system_prompt = request.system_prompt
+    if relevant_context:
+        rag_prompt = (
+            "\n\n请基于以下参考资料回答用户的问题。如果参考资料中没有相关信息，请明确说明。\n\n"
+            f"[参考资料开始]\n{relevant_context}\n[参考资料结束]"
+        )
+        final_system_prompt = (
+            final_system_prompt + rag_prompt if final_system_prompt else rag_prompt
+        )
+
+    # 3) 历史：复用与流式接口相同的「按 Token 预算从近到远」策略，保证行为一致
+    MAX_HISTORY_TOKENS = 2000
+    all_history_records = db.query(models.ChatMessage).order_by(models.ChatMessage.id.desc()).all()
+    history: List[Dict[str, str]] = []
+    current_tokens = 0
+    for msg in all_history_records[1:]:
+        msg_dict = {"role": msg.role, "content": msg.content}
+        msg_tokens = get_messages_token_count([msg_dict])
+        if current_tokens + msg_tokens > MAX_HISTORY_TOKENS:
+            break
+        history.append(msg_dict)
+        current_tokens += msg_tokens
+    history.reverse()
+
+    # 4) 调用 Agent 编排层（纯异步，不持有 db Session）
+    reply, steps = await run_tool_agent(
+        user_message=request.message,
+        history=history,
+        system_prompt=final_system_prompt or None,
+    )
+
+    # 5) 落库助手最终回复
+    assistant_msg = models.ChatMessage(role="assistant", content=reply)
+    db.add(assistant_msg)
+    db.commit()
+
+    return AgentChatResponse(reply=reply, steps=steps)
+
 
 # ----------------- V3.0 新增：文档上传与处理接口 -----------------
 @router.post("/upload")
