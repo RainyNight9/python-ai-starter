@@ -1,16 +1,34 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List
+import tiktoken
+import os
+import shutil
 
 from app.db.database import get_db
 from app.db import models
 from app.services.llm import generate_ai_response, generate_ai_response_stream
+from app.rag.document_processor import process_and_store_document, retrieve_relevant_context
 
 # ==========================================
 # API 路由与接口 (处理 HTTP 请求)
 # ==========================================
+
+# 初始化 tiktoken 编码器（使用 gpt-3.5/gpt-4 通用的 cl100k_base 词表）
+encoding = tiktoken.get_encoding("cl100k_base")
+
+def get_messages_token_count(messages: list) -> int:
+    """计算一段对话历史的总 Token 数量"""
+    num_tokens = 0
+    for message in messages:
+        # 每条消息都会有一些格式上的开销（如 <|im_start|> 等）
+        num_tokens += 4 
+        for key, value in message.items():
+            num_tokens += len(encoding.encode(str(value)))
+    num_tokens += 2  # 加上最后的 <|im_start|>assistant 开销
+    return num_tokens
 
 # 创建路由对象，相当于应用的一个子模块
 router = APIRouter()
@@ -33,27 +51,56 @@ class MessageDTO(BaseModel):
 @router.post("/chat/stream")
 async def chat_with_ai_stream(request: ChatRequest, db: Session = Depends(get_db)):
     """
-    【V2.0 新增】流式对话接口 (Server-Sent Events)
+    【V3.0 新增 RAG】流式对话接口 (Server-Sent Events)
     """
     # 1. 保存用户的消息到数据库
     user_msg = models.ChatMessage(role="user", content=request.message)
     db.add(user_msg)
     db.commit()
     
-    # 2. 获取历史记录作为上下文
-    history_records = db.query(models.ChatMessage).order_by(models.ChatMessage.id.desc()).limit(10).all()
-    history_records.reverse()
-    history = [{"role": msg.role, "content": msg.content} for msg in history_records[:-1]]
+    # 2. 【RAG 核心逻辑】：去向量数据库里搜相关的文档内容
+    relevant_context = retrieve_relevant_context(request.message)
+    
+    # 动态组装 System Prompt
+    final_system_prompt = request.system_prompt
+    if relevant_context:
+        rag_prompt = f"\n\n请基于以下参考资料回答用户的问题。如果参考资料中没有相关信息，请明确说明。\n\n[参考资料开始]\n{relevant_context}\n[参考资料结束]"
+        final_system_prompt = final_system_prompt + rag_prompt if final_system_prompt else rag_prompt
+    
+    # 3. 获取并智能截断历史记录 (Token 管理)
+    MAX_HISTORY_TOKENS = 2000  # 我们允许历史记录占用的最大 Token 数
+    
+    # 先把所有的历史记录取出来
+    all_history_records = db.query(models.ChatMessage).order_by(models.ChatMessage.id.desc()).all()
+    
+    # 动态组装历史记录，确保总 Token 数不超过限制
+    history = []
+    current_tokens = 0
+    
+    # 因为查出来是倒序的（最新的在前面），我们要跳过第一条（刚刚存入的用户新消息）
+    for msg in all_history_records[1:]:
+        msg_dict = {"role": msg.role, "content": msg.content}
+        msg_tokens = get_messages_token_count([msg_dict])
+        
+        # 如果加上这条消息就超了，说明前面的记忆已经装不下了，停止追加
+        if current_tokens + msg_tokens > MAX_HISTORY_TOKENS:
+            break
+            
+        history.append(msg_dict)
+        current_tokens += msg_tokens
+        
+    # 把截取出来的历史记录反转回时间正序
+    history.reverse()
 
-    # 3. 构造流式生成器函数
+    # 4. 构造流式生成器函数
     async def event_generator():
         full_reply = ""
         # 逐块接收 AI 吐出来的字
-        async for chunk in generate_ai_response_stream(request.message, history, request.system_prompt):
+        async for chunk in generate_ai_response_stream(request.message, history, final_system_prompt):
             full_reply += chunk
             yield chunk  # 立刻把这个字发送给前端
             
-        # 4. 当流式输出完全结束后，我们才得到完整的句子，这时把它存入数据库
+        # 5. 当流式输出完全结束后，把它存入数据库
         if full_reply:
             assistant_msg = models.ChatMessage(role="assistant", content=full_reply)
             db.add(assistant_msg)
@@ -61,6 +108,28 @@ async def chat_with_ai_stream(request: ChatRequest, db: Session = Depends(get_db
 
     # 使用 StreamingResponse 返回流式数据
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+# ----------------- V3.0 新增：文档上传与处理接口 -----------------
+@router.post("/upload")
+async def upload_document(file: UploadFile = File(...)):
+    """接收前端上传的文档，并送入向量数据库"""
+    if not file.filename.endswith(('.pdf', '.txt')):
+        raise HTTPException(status_code=400, detail="只支持上传 PDF 或 TXT 文件")
+        
+    os.makedirs("uploads", exist_ok=True)
+    file_path = f"uploads/{file.filename}"
+    
+    # 1. 保存文件到本地
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    try:
+        # 2. 调用 RAG 处理逻辑：解析 -> 切块 -> 向量化 -> 存库
+        chunks_count = process_and_store_document(file_path)
+        return {"status": "success", "message": f"文件 {file.filename} 处理成功，共切分出 {chunks_count} 个知识块。"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件处理失败: {str(e)}")
+# --------------------------------------------------------
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_ai(request: ChatRequest, db: Session = Depends(get_db)):

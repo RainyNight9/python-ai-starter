@@ -5,3 +5,12 @@ sqlalchemy
 python-dotenv
 pydantic
 pydantic-settings
+tiktoken
+langchain
+langchain-core
+langchain-community
+langchain-openai
+pypdf
+python-multipart
+faiss-cpu
+requests

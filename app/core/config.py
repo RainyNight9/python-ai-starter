@@ -21,5 +21,8 @@ class Settings(BaseSettings):
     # 数据库连接 URL，这里使用本地 SQLite 数据库文件 (ai_platform.db)
     DATABASE_URL: str = "sqlite:///./ai_platform.db"
 
+    # RAG / Embedding 相关配置
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v3")
+
 # 实例化配置对象，其他文件可以直接 from app.core.config import settings 引入使用
 settings = Settings()

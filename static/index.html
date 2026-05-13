@@ -17,6 +17,10 @@
         .system-config { padding: 15px 20px; background: #e8f4fd; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; }
         .system-config label { font-size: 14px; color: #007aff; font-weight: bold; white-space: nowrap; }
         .system-config input { flex: 1; padding: 8px; border: 1px solid #bce0fd; border-radius: 5px; outline: none; }
+        .upload-area { padding: 10px 20px; background: #fdf6e3; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; font-size: 14px; }
+        .upload-area input[type="file"] { flex: 1; }
+        .upload-area button { padding: 5px 15px; background: #ff9800; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .upload-area button:disabled { background: #ccc; }
         .input-area { padding: 20px; border-top: 1px solid #eee; display: flex; gap: 10px; }
         input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 5px; outline: none; font-size: 16px; }
         input[type="text"]:focus { border-color: #007aff; }
@@ -29,12 +33,18 @@
 
 <div class="chat-container">
     <div class="header">
-        <h2>🤖 专属 AI 助手 (V2.0)</h2>
+        <h2>🤖 专属 AI 助手 (V3.0 RAG)</h2>
         <button class="clear-btn" onclick="clearHistory()">清空历史</button>
     </div>
     <div class="system-config">
         <label>🎭 角色设定 (System Prompt):</label>
         <input type="text" id="sysPrompt" placeholder="例如：你是一个精通 Python 的资深架构师，说话非常毒舌但很专业。">
+    </div>
+    <div class="upload-area">
+        <label>📚 上传知识库 (仅限 PDF/TXT):</label>
+        <input type="file" id="fileInput" accept=".pdf,.txt">
+        <button id="uploadBtn" onclick="uploadFile()">喂给 AI 学习</button>
+        <span id="uploadStatus" style="color: #666; font-size: 12px;"></span>
     </div>
     <div class="messages" id="messages">
         <!-- 消息将会渲染在这里 -->
@@ -156,6 +166,46 @@
             messagesDiv.innerHTML = ''; // 清空页面上的消息列表
         } catch (e) {
             alert('清空失败');
+        }
+    }
+
+    // 上传文件到知识库
+    async function uploadFile() {
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadStatus = document.getElementById('uploadStatus');
+        
+        if (!fileInput.files.length) {
+            alert("请先选择一个文件！");
+            return;
+        }
+        
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        uploadBtn.disabled = true;
+        uploadStatus.textContent = "正在解析并向量化，请稍候...";
+        
+        try {
+            const res = await fetch(`${API_BASE}/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+                uploadStatus.style.color = "green";
+                uploadStatus.textContent = "✅ " + data.message;
+                fileInput.value = ""; // 清空文件选择
+            } else {
+                throw new Error(data.detail || "上传失败");
+            }
+        } catch (e) {
+            uploadStatus.style.color = "red";
+            uploadStatus.textContent = "❌ " + e.message;
+        } finally {
+            uploadBtn.disabled = false;
         }
     }
 </script>
