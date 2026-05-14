@@ -7,18 +7,28 @@
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
         .chat-container { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; height: 80vh; }
-        .header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-        .header h2 { margin: 0; color: #333; }
+        .header { padding: 20px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        .header h2 { margin: 0; color: #333; font-size: 1.1rem; }
         .clear-btn { padding: 8px 15px; background: #ff4d4f; color: white; border: none; border-radius: 5px; cursor: pointer; }
         .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
         .message { max-width: 80%; padding: 12px 16px; border-radius: 8px; line-height: 1.5; word-wrap: break-word; white-space: pre-wrap; }
         .user { background: #007aff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
-        .assistant { background: #f0f0f0; color: #333; align-self: flex-start; border-bottom-left-radius: 2px; }
+        .assistant { background: #f0f0f0; color: #333; align-self: flex-start; border-bottom-right-radius: 2px; }
         .system-config { padding: 15px 20px; background: #e8f4fd; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; }
         .system-config label { font-size: 14px; color: #007aff; font-weight: bold; white-space: nowrap; }
         .system-config input { flex: 1; padding: 8px; border: 1px solid #bce0fd; border-radius: 5px; outline: none; }
-        .upload-area { padding: 10px 20px; background: #fdf6e3; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; font-size: 14px; }
-        .upload-area input[type="file"] { flex: 1; }
+        .session-bar { padding: 10px 20px; background: #ecfdf5; border-bottom: 1px solid #d1fae5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+        .session-bar select { flex: 1; min-width: 160px; padding: 6px 8px; border-radius: 5px; border: 1px solid #6ee7b7; }
+        .session-bar button { padding: 6px 12px; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; }
+        .btn-new { background: #059669; color: white; }
+        .btn-del { background: #f97316; color: white; }
+        .rag-citations { margin: 0 20px 10px; padding: 10px 12px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 8px; font-size: 12px; color: #78350f; display: none; }
+        .rag-citations.visible { display: block; }
+        .rag-citations h4 { margin: 0 0 8px; font-size: 13px; color: #92400e; }
+        .rag-citations ul { margin: 0; padding-left: 18px; }
+        .rag-citations li { margin-bottom: 6px; }
+        .upload-area { padding: 10px 20px; background: #fdf6e3; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; font-size: 14px; flex-wrap: wrap; }
+        .upload-area input[type="file"] { flex: 1; min-width: 120px; }
         .upload-area button { padding: 5px 15px; background: #ff9800; color: white; border: none; border-radius: 5px; cursor: pointer; }
         .upload-area button:disabled { background: #ccc; }
         .input-area { padding: 20px; border-top: 1px solid #eee; display: flex; gap: 10px; }
@@ -37,14 +47,19 @@
 
 <div class="chat-container">
     <div class="header">
-        <h2>🤖 专属 AI 助手 (V3.1 RAG + Agent)</h2>
-        <button class="clear-btn" onclick="clearHistory()">清空历史</button>
+        <h2>🤖 专属 AI 助手 (v3.2 多会话 + RAG 引用 + Agent)</h2>
+        <button class="clear-btn" onclick="clearHistory()">清空本会话</button>
+    </div>
+    <div class="session-bar">
+        <label for="sessionSelect">💬 会话:</label>
+        <select id="sessionSelect" onchange="onSessionChange()"></select>
+        <button type="button" class="btn-new" onclick="createNewSession()">新建会话</button>
+        <button type="button" class="btn-del" onclick="deleteCurrentSession()">删除当前会话</button>
     </div>
     <div class="system-config">
         <label>🎭 角色设定 (System Prompt):</label>
         <input type="text" id="sysPrompt" placeholder="例如：你是一个精通 Python 的资深架构师，说话非常毒舌但很专业。">
     </div>
-    <!-- Agent 模式：走后端 /api/chat/agent，启用「工具调用」教学链路（非流式，一次返回完整 JSON） -->
     <div class="agent-bar">
         <input type="checkbox" id="agentMode">
         <label for="agentMode">🧩 Agent 模式（工具调用：计算 / 时间 / 反转文本）</label>
@@ -55,9 +70,8 @@
         <button id="uploadBtn" onclick="uploadFile()">喂给 AI 学习</button>
         <span id="uploadStatus" style="color: #666; font-size: 12px;"></span>
     </div>
-    <div class="messages" id="messages">
-        <!-- 消息将会渲染在这里 -->
-    </div>
+    <div id="ragPanel" class="rag-citations"></div>
+    <div class="messages" id="messages"></div>
     <div class="loading" id="loading">AI 正在思考...</div>
     <div class="input-area">
         <input type="text" id="userInput" placeholder="输入你想对 AI 说的话..." onkeypress="handleKeyPress(event)">
@@ -66,69 +80,211 @@
 </div>
 
 <script>
-    // 后端 API 基础路径，因为页面和接口同源，所以用相对路径即可
     const API_BASE = '/api';
-    
-    // 获取 DOM 元素
+    const LS_SESSION = 'ais_current_session_id';
+
     const messagesDiv = document.getElementById('messages');
     const loadingDiv = document.getElementById('loading');
     const userInput = document.getElementById('userInput');
     const sendBtn = document.getElementById('sendBtn');
+    const ragPanel = document.getElementById('ragPanel');
 
-    // 页面加载完成后，自动拉取历史聊天记录
+    function getSessionId() {
+        const sel = document.getElementById('sessionSelect');
+        const v = parseInt(sel.value, 10);
+        return Number.isFinite(v) ? v : 1;
+    }
+
+    function setRagCitations(items) {
+        ragPanel.classList.remove('visible');
+        ragPanel.innerHTML = '';
+        if (!items || !items.length) return;
+        ragPanel.classList.add('visible');
+        const h = document.createElement('h4');
+        h.textContent = '本次回答参考的检索片段（RAG 可观测）';
+        ragPanel.appendChild(h);
+        const ul = document.createElement('ul');
+        items.forEach((c, i) => {
+            const li = document.createElement('li');
+            const page = c.page != null ? ` · 页/块: ${c.page}` : '';
+            const dist = c.distance != null ? ` · distance: ${c.distance.toFixed(4)}` : '';
+            li.textContent = `[${i + 1}] ${c.source || '未知'}${page}${dist} — ${c.snippet_preview || ''}`;
+            ul.appendChild(li);
+        });
+        ragPanel.appendChild(ul);
+    }
+
+    async function refreshSessionSelect() {
+        const res = await fetch(`${API_BASE}/sessions`);
+        if (!res.ok) throw new Error('加载会话列表失败');
+        const sessions = await res.json();
+        const sel = document.getElementById('sessionSelect');
+        sel.innerHTML = '';
+        sessions.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = String(s.id);
+            opt.textContent = `#${s.id} ${s.title}`;
+            sel.appendChild(opt);
+        });
+        const saved = localStorage.getItem(LS_SESSION);
+        const savedId = saved ? parseInt(saved, 10) : NaN;
+        const ids = sessions.map(s => s.id);
+        if (ids.length && ids.includes(savedId)) {
+            sel.value = String(savedId);
+        } else if (ids.length) {
+            sel.value = String(ids[0]);
+            localStorage.setItem(LS_SESSION, sel.value);
+        }
+    }
+
+    async function loadHistory() {
+        const sid = getSessionId();
+        messagesDiv.innerHTML = '';
+        setRagCitations(null);
+        const res = await fetch(`${API_BASE}/history?session_id=${sid}`);
+        if (!res.ok) throw new Error('加载历史失败');
+        const history = await res.json();
+        history.forEach(msg => appendMessage(msg.role, msg.content));
+        scrollToBottom();
+    }
+
     window.onload = async () => {
         try {
-            // fetch 默认是 GET 请求
-            const res = await fetch(`${API_BASE}/history`);
-            const history = await res.json();
-            // 遍历历史记录并渲染到页面上
-            history.forEach(msg => appendMessage(msg.role, msg.content));
-            scrollToBottom();
+            await refreshSessionSelect();
+            await loadHistory();
         } catch (e) {
-            console.error("加载历史记录失败", e);
+            console.error(e);
+            appendMessage('assistant', '⚠️ 初始化失败：' + (e.message || String(e)));
         }
     };
 
-    // 封装一个渲染消息气泡的函数
+    async function onSessionChange() {
+        localStorage.setItem(LS_SESSION, document.getElementById('sessionSelect').value);
+        try {
+            await loadHistory();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    async function createNewSession() {
+        try {
+            const res = await fetch(`${API_BASE}/sessions`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: '新会话' })
+            });
+            if (!res.ok) throw new Error('创建失败');
+            const s = await res.json();
+            await refreshSessionSelect();
+            document.getElementById('sessionSelect').value = String(s.id);
+            localStorage.setItem(LS_SESSION, String(s.id));
+            await loadHistory();
+        } catch (e) {
+            alert(e.message || String(e));
+        }
+    }
+
+    async function deleteCurrentSession() {
+        if (!confirm('确定删除当前会话及其所有消息？')) return;
+        try {
+            const sid = getSessionId();
+            const res = await fetch(`${API_BASE}/sessions/${sid}`, { method: 'DELETE' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || res.statusText);
+            await refreshSessionSelect();
+            await loadHistory();
+        } catch (e) {
+            alert(e.message || String(e));
+        }
+    }
+
     function appendMessage(role, content) {
         const div = document.createElement('div');
-        div.className = `message ${role}`; // 根据 role 添加 user 还是 assistant 的样式类
-        div.textContent = content;         // 使用 textContent 防范 XSS 注入攻击
+        div.className = `message ${role}`;
+        div.textContent = content;
         messagesDiv.appendChild(div);
         scrollToBottom();
     }
 
-    // 保持滚动条永远在最底部，看最新消息
     function scrollToBottom() {
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
-    // 核心函数：发送消息给后端
+    /**
+     * 流式首行固定为 ::META::{JSON}\n，JSON 内含 rag_citations（可为空数组）。
+     */
+    async function streamChatToDiv(res, div) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+            const nl = buffer.indexOf('\n');
+            if (nl === -1) {
+                if (done) {
+                    div.textContent += buffer;
+                    return;
+                }
+                continue;
+            }
+
+            const firstLine = buffer.slice(0, nl);
+            buffer = buffer.slice(nl + 1);
+
+            if (firstLine.startsWith('::META::')) {
+                try {
+                    const meta = JSON.parse(firstLine.slice(8));
+                    setRagCitations(meta.rag_citations || []);
+                } catch (_) {
+                    setRagCitations(null);
+                }
+            } else {
+                div.textContent += firstLine + '\n';
+            }
+
+            div.textContent += buffer;
+            buffer = '';
+            scrollToBottom();
+
+            while (true) {
+                const r = await reader.read();
+                const piece = decoder.decode(r.value || new Uint8Array(), { stream: !r.done });
+                div.textContent += piece;
+                scrollToBottom();
+                if (r.done) return;
+            }
+        }
+    }
+
     async function sendMessage() {
         const text = userInput.value.trim();
-        const sysPrompt = document.getElementById('sysPrompt').value.trim(); // 获取系统提示词
+        const sysPrompt = document.getElementById('sysPrompt').value.trim();
         if (!text) return;
 
-        // 1. 先把用户的消息显示在界面上
+        setRagCitations(null);
         appendMessage('user', text);
-        
-        // 2. 清空输入框，并禁用按钮防止重复点击
+
         userInput.value = '';
         userInput.disabled = true;
         sendBtn.disabled = true;
-        loadingDiv.style.display = 'block'; // 显示 "AI正在思考"
+        loadingDiv.style.display = 'block';
         scrollToBottom();
+
+        const sid = getSessionId();
+        const body = { message: text, system_prompt: sysPrompt, session_id: sid };
 
         try {
             const useAgent = document.getElementById('agentMode').checked;
 
             if (useAgent) {
-                // ---------- Agent 路径：非流式，一次拿到 { reply, steps } ----------
-                // 学习要点：这与流式路径不同——浏览器会等整个 HTTP 响应结束后再渲染。
                 const res = await fetch(`${API_BASE}/chat/agent`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, system_prompt: sysPrompt })
+                    body: JSON.stringify(body)
                 });
                 loadingDiv.style.display = 'none';
 
@@ -137,20 +293,19 @@
                     try {
                         const errJson = await res.json();
                         errText = errJson.detail || errText;
-                    } catch (_) { /* 非 JSON 错误体时忽略 */ }
+                    } catch (_) {}
                     throw new Error(errText);
                 }
 
                 const data = await res.json();
+                setRagCitations(data.rag_citations || []);
+
                 const wrap = document.createElement('div');
                 wrap.className = 'message assistant';
-
-                // 主文本：模型的最终自然语言答案
                 const main = document.createElement('div');
                 main.textContent = data.reply || '';
                 wrap.appendChild(main);
 
-                // 可折叠轨迹：帮助你理解「模型在第几轮选择了哪些工具」
                 if (Array.isArray(data.steps) && data.steps.length) {
                     const det = document.createElement('details');
                     det.className = 'agent-trace';
@@ -168,11 +323,10 @@
                 messagesDiv.appendChild(wrap);
                 scrollToBottom();
             } else {
-                // ---------- 默认路径：流式 + 可选 RAG（v3.0 主链路） ----------
                 const res = await fetch(`${API_BASE}/chat/stream`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text, system_prompt: sysPrompt })
+                    body: JSON.stringify(body)
                 });
 
                 loadingDiv.style.display = 'none';
@@ -182,83 +336,71 @@
                 messagesDiv.appendChild(div);
                 scrollToBottom();
 
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    div.textContent += decoder.decode(value, { stream: true });
-                    scrollToBottom();
-                }
+                await streamChatToDiv(res, div);
+                scrollToBottom();
             }
         } catch (e) {
-            // 尽量把后端的错误信息透传出来，便于你对照网络面板与终端日志排查
             const hint = (e && e.message) ? e.message : String(e);
             appendMessage('assistant', '⚠️ 发送失败：' + hint);
         } finally {
-            // 6. 不论成功还是失败，最后都要恢复输入框和按钮的状态
             userInput.disabled = false;
             sendBtn.disabled = false;
             loadingDiv.style.display = 'none';
-            userInput.focus(); // 自动让输入框获取焦点
+            userInput.focus();
             scrollToBottom();
         }
     }
 
-    // 监听回车键发送
     function handleKeyPress(e) {
-        if (e.key === 'Enter') {
-            sendMessage();
-        }
+        if (e.key === 'Enter') sendMessage();
     }
 
-    // 清空历史记录功能
     async function clearHistory() {
-        if (!confirm('确定要清空聊天记录吗？')) return;
+        if (!confirm('确定要清空本会话聊天记录吗？')) return;
         try {
-            await fetch(`${API_BASE}/history`, { method: 'DELETE' });
-            messagesDiv.innerHTML = ''; // 清空页面上的消息列表
+            const sid = getSessionId();
+            await fetch(`${API_BASE}/history?session_id=${sid}`, { method: 'DELETE' });
+            messagesDiv.innerHTML = '';
+            setRagCitations(null);
         } catch (e) {
             alert('清空失败');
         }
     }
 
-    // 上传文件到知识库
     async function uploadFile() {
         const fileInput = document.getElementById('fileInput');
         const uploadBtn = document.getElementById('uploadBtn');
         const uploadStatus = document.getElementById('uploadStatus');
-        
+
         if (!fileInput.files.length) {
-            alert("请先选择一个文件！");
+            alert('请先选择一个文件！');
             return;
         }
-        
+
         const file = fileInput.files[0];
         const formData = new FormData();
         formData.append('file', file);
-        
+
         uploadBtn.disabled = true;
-        uploadStatus.textContent = "正在解析并向量化，请稍候...";
-        
+        uploadStatus.textContent = '正在解析并向量化，请稍候...';
+
         try {
             const res = await fetch(`${API_BASE}/upload`, {
                 method: 'POST',
                 body: formData
             });
             const data = await res.json();
-            
+
             if (res.ok) {
-                uploadStatus.style.color = "green";
-                uploadStatus.textContent = "✅ " + data.message;
-                fileInput.value = ""; // 清空文件选择
+                uploadStatus.style.color = 'green';
+                uploadStatus.textContent = '✅ ' + data.message;
+                fileInput.value = '';
             } else {
-                throw new Error(data.detail || "上传失败");
+                throw new Error(data.detail || '上传失败');
             }
         } catch (e) {
-            uploadStatus.style.color = "red";
-            uploadStatus.textContent = "❌ " + e.message;
+            uploadStatus.style.color = 'red';
+            uploadStatus.textContent = '❌ ' + e.message;
         } finally {
             uploadBtn.disabled = false;
         }

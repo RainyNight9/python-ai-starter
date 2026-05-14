@@ -14,6 +14,10 @@ from app.db.models import Base
 # 如果没有，它会自动根据 models.py 中的定义创建表
 Base.metadata.create_all(bind=engine)
 
+from app.db.migrate import run_startup_migrations
+
+run_startup_migrations(engine)
+
 # 创建 FastAPI 应用实例
 app = FastAPI(title="Python AI Platform", description="从 0 到 1 搭建的 AI 调用平台")
 

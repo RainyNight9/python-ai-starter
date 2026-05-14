@@ -5,12 +5,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![OpenAI Compatible](https://img.shields.io/badge/OpenAI-Compatible-412991.svg)](https://openai.com/)
 
-欢迎来到 **Python AI 全栈入门项目**！本项目专为你从 0 搭建自己的 AI 调用平台而设计，涵盖了「后端接口 + AI 调用 + 数据库存储 + 极简前端」。当前默认体验已对齐 **v3.1**：在 **v3.0**（流式对话、系统提示词、基于 Token 的历史截断、**RAG**）基础上，增加 **Agent 模式**（工具调用 / Function Calling，非流式，返回 `steps` 轨迹；可与 RAG 并存）。更细的小白向说明见 **[LEARNING_GUIDE.md](LEARNING_GUIDE.md)**。
+欢迎来到 **Python AI 全栈入门项目**！本项目专为你从 0 搭建自己的 AI 调用平台而设计，涵盖了「后端接口 + AI 调用 + 数据库存储 + 极简前端」。当前默认体验已对齐 **v3.2**：在 **v3.1**（流式、系统提示词、Token 历史、RAG、Agent）基础上，增加 **多会话**（`chat_sessions` + 请求体 `session_id`）与 **RAG 引用可观测**（检索片段的文件名、页码、距离、摘要预览；流式首行 `::META::` JSON，Agent 响应字段 `rag_citations`）。更细的小白向说明见 **[LEARNING_GUIDE.md](LEARNING_GUIDE.md)**。
 
 通过这个项目，你将经历：**从工程入手 → 跑通 → 理解 → 升级 → 变成 AI 全栈** 的完整学习路径。
 
 ## 📑 目录 (Table of Contents)
-- [当前版本已实现能力 (v3.1)](#-当前版本已实现能力-v31)
+- [当前版本已实现能力 (v3.2)](#-当前版本已实现能力-v32)
 - [🟢 第一阶段：工程入手与跑通 (Run)](#-第一阶段工程入手与跑通-run)
 - [🔵 第二阶段：理解核心代码 (Understand)](#-第二阶段理解核心代码-understand)
 - [🟠 第三阶段：内置能力说明与仍可做的挑战 (Upgrade)](#-第三阶段内置能力说明与仍可做的挑战-upgrade)
@@ -20,17 +20,18 @@
 
 ---
 
-## ✨ 当前版本已实现能力 (v3.1)
+## ✨ 当前版本已实现能力 (v3.2)
 
 | 能力 | 说明 |
 |------|------|
-| **流式对话** | 前端默认（未勾选 Agent）调用 `POST /api/chat/stream`，用 `fetch` + `ReadableStream` 逐块显示回复。 |
-| **系统提示词** | 请求体字段 `system_prompt`；前端「角色设定」输入框对应此项。 |
-| **历史与 Token** | 流式与 Agent 接口内用 `tiktoken`（`cl100k_base`）控制历史消息总 Token，避免上下文过长。 |
-| **RAG** | `POST /api/upload` 上传 PDF/TXT → LangChain 切块 → **DashScope** Embedding → 本地 **FAISS** 索引；对话前 `retrieve_relevant_context` 检索片段并拼入系统侧说明。 |
-| **Agent / 工具调用** | `POST /api/chat/agent`：模型可多次调用后端工具（计算、服务器时间、反转文本等）；返回 `reply` + `steps`；可与 RAG、系统提示词并存；需网关与模型支持 `tools` / `tool_calls`。 |
-| **非流式兼容** | `POST /api/chat` 仍保留：固定取最近 10 条历史、**不**走 RAG、**不**带 `system_prompt`（便于对照「最小接口」与「完整能力」的差异）。 |
-| **历史 API** | `GET /api/history` 拉取全部消息；`DELETE /api/history` 清空聊天记录。 |
+| **流式对话** | 前端默认（未勾选 Agent）调用 `POST /api/chat/stream`；首行固定为 `::META::` + JSON（`rag_citations`，可为空），随后为模型文本流。 |
+| **系统提示词** | 请求体字段 `system_prompt`；与 RAG 拼接后一并注入 system。 |
+| **多会话** | 表 `chat_sessions`；聊天请求体带 `session_id`（默认 `1`）；`GET/POST /api/sessions`、`DELETE /api/sessions/{id}`；`GET/DELETE /api/history?session_id=` 按会话隔离。 |
+| **历史与 Token** | 流式与 Agent 接口内用 `tiktoken`（`cl100k_base`）控制历史消息总 Token。 |
+| **RAG + 引用** | 检索使用 `similarity_search_with_score`；返回 `source`（文件名）、`page`、`distance`、`snippet_preview`；前端在黄色信息条展示。 |
+| **Agent / 工具调用** | `POST /api/chat/agent`：返回 `reply` + `steps` + `rag_citations`；需网关支持 `tools` / `tool_calls`。 |
+| **非流式兼容** | `POST /api/chat`：最近 10 条、无 RAG、无 `system_prompt`；同样支持 `session_id`。 |
+| **历史 API** | `GET /api/history?session_id=`；`DELETE /api/history?session_id=`。 |
 
 **配置要点：**
 
@@ -82,34 +83,37 @@ python3 -m uvicorn app.main:app --reload
 
 ## 🔵 第二阶段：理解核心代码 (Understand)
 
-了解项目是怎么跑起来的，建议按下面顺序阅读（**零基础长文手册**见 [LEARNING_GUIDE.md](LEARNING_GUIDE.md)，已对齐 v3.1）：
+了解项目是怎么跑起来的，建议按下面顺序阅读（**零基础长文手册**见 [LEARNING_GUIDE.md](LEARNING_GUIDE.md)；代码已迭代至 **v3.2**）：
 
 1. **`app/main.py`**（程序入口）  
    挂载 API（`/api`）、静态前端（`static/`）、CORS。
 
-2. **`app/core/config.py`**（配置）  
+2. **`app/db/models.py`**、`app/db/migrate.py`（v3.2 多会话）  
+   `ChatSession` / `ChatMessage.session_id`；启动时 SQLite 轻量迁移。
+
+3. **`app/core/config.py`**（配置）  
    从环境变量读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`MODEL_NAME`、`EMBEDDING_MODEL` 等。
 
-3. **`app/services/llm.py`**（聊天模型调用）  
+4. **`app/services/llm.py`**（聊天模型调用）  
    `generate_ai_response_stream`：流式 + `system_prompt` + `history`；`generate_ai_response`：非流式，供 `/api/chat` 使用。
 
-4. **`app/api/endpoints.py`**（HTTP 接口）  
-   - `POST /chat/stream`：存用户消息 → RAG 检索 → Token 截断历史 → 流式调模型 → 存助手回复。  
-   - `POST /chat/agent`：同上 RAG 与历史策略 → `run_tool_agent` 工具循环 → 存助手最终回复，响应含 `steps`。  
-   - `POST /upload`：保存上传文件并调用 RAG 入库。  
-   - `POST /chat`、`GET/DELETE /history`：见上表。
+5. **`app/api/endpoints.py`**（HTTP 接口）  
+   - `POST /chat/stream`：按 `session_id` 存消息 → RAG 检索（含引用元数据）→ Token 截断历史 → 流式输出（首行 `::META::`）。  
+   - `POST /chat/agent`：同上，响应含 `steps` 与 `rag_citations`。  
+   - `GET/POST /api/sessions`、`DELETE /api/sessions/{id}`；`GET/DELETE /history?session_id=`。  
+   - `POST /upload`、`POST /chat`：见上表。
 
-5. **`app/services/agent_service.py`**、`app/agent/`（v3.1 Agent）  
+6. **`app/services/agent_service.py`**、`app/agent/`（Agent）  
    工具声明与实现、`run_tool_agent` 多轮 `tool_calls` 编排与 `steps` 轨迹。
 
-6. **`app/rag/document_processor.py`**（RAG）  
-   文档加载、切块、DashScope Embedding、FAISS 本地持久化与相似度检索。
+7. **`app/rag/document_processor.py`**（RAG）  
+   文档加载、切块、DashScope Embedding、FAISS；`retrieve_relevant_context_with_citations` 返回正文与引用列表。
 
-7. **`app/db/`**（持久化）  
-   `models.py`：`ChatMessage`（`role`、`content`、`created_at`）；`database.py`：SQLite 与 Session。
+8. **`app/db/database.py`**（持久化）  
+   引擎、`get_db`、会话工厂。
 
-8. **`static/index.html`**（前端）  
-   系统提示词、上传、Agent 模式勾选、`fetch` 调用 `/api/chat/stream` 或 `/api/chat/agent` 与 `/api/upload`，以及历史加载与清空。
+9. **`static/index.html`**（前端）  
+   会话切换/新建/删除、系统提示词、上传、Agent 勾选、流式解析 `::META::` 与 RAG 引用展示、历史按会话加载。
 
 ---
 
@@ -117,23 +121,25 @@ python3 -m uvicorn app.main:app --reload
 
 下列能力 **已在当前代码中实现**，适合对照源码阅读，而不是从零重做一遍：
 
-- **流式输出**：`/api/chat/stream` + `llm.generate_ai_response_stream` + 前端 `ReadableStream`。
+- **流式输出**：`/api/chat/stream` + `llm.generate_ai_response_stream`；首行 `::META::` 承载 `rag_citations`。
 - **系统提示词**：`ChatRequest.system_prompt`，流式与 Agent 链路均可使用（非流式 `/api/chat` 除外）。
+- **多会话**：`ChatSession` + `session_id`；`/api/sessions` 与按会话的 `/api/history`。
+- **RAG 引用可观测**：`retrieve_relevant_context_with_citations` + 前端黄色引用条；Agent 响应字段 `rag_citations`。
 - **Agent 工具调用**：`/api/chat/agent` + `agent_service.run_tool_agent` + `app/agent/`；前端展示 `steps`。
 - **换模型 / 换网关**：改 `.env` 中的 `OPENAI_BASE_URL`、`MODEL_NAME`、`OPENAI_API_KEY`；无需改 `llm.py` 里的 URL（客户端从 `settings` 读取）。
 
 你仍可尝试的 **进阶挑战**（仓库尚未实现或仅部分涉及）：
 
-1. **多会话 (Sessions)**：为 `ChatMessage` 增加 `session_id`（或会话表），前端按会话切换与隔离历史。  
+1. **会话增强**：重命名会话、导出某会话为 Markdown、会话级「清空向量库」等。  
 2. **统一两条聊天接口**：让 `/api/chat` 也支持 `system_prompt` 与 RAG，或明确在文档中保留「简化版 vs 完整版」的教学分工（当前为后者）。  
-3. **RAG 增强**：引用来源（文件名/页码）、删除与重建索引、rerank、混合检索等。  
+3. **RAG 增强**：混合检索、rerank、按文档删除索引、重建向量库等。  
 4. **流式 Agent / 更多工具**：在现有 Agent 循环上增加 SSE、搜索、天气、业务 API 等（注意工具安全与白名单）。
 
 ---
 
 ## 🔴 第四阶段：变成 AI 全栈 (Become Full-Stack)
 
-在掌握 v3.1 代码路径基础上，可继续深入：
+在掌握 v3.2 代码路径基础上，可继续深入：
 
 1. **RAG 工程化**：更大规模的切片策略、评测集、幻觉与引用格式规范；向量库可对比 Chroma / Milvus 与当前 FAISS 本地方案的差异。  
 2. **Agent 进阶**：流式工具回合、并行工具、更强错误恢复与观测（日志 / OpenTelemetry）。  

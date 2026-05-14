@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import Any, Dict, List, Tuple
 
 import requests
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
@@ -302,54 +302,49 @@ def process_and_store_document(file_path: str):
     return len(chunks)
 
 
-def retrieve_relevant_context(query: str, top_k: int = 3) -> str:
-    """根据用户问题，从向量数据库中检索最相关的文档片段。
+def retrieve_relevant_context_with_citations(
+    query: str, top_k: int = 3
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """检索相关片段，并返回用于 UI 展示的引用信息（文件名、页码、距离、摘要）。
 
-    这个函数通常在调用大模型之前执行。它不会直接生成答案，只负责找资料。
-    典型用法是：
-
-    1. 用户问一个问题。
-    2. 本函数返回相关 context。
-    3. 后续接口把 context + 用户问题一起发给大模型。
-    4. 大模型基于 context 回答，减少胡编乱造。
-
-    Args:
-        query: 用户输入的问题。
-        top_k: 返回最相似的前几个文本块。数字越大，给模型的资料越多，但也更占上下文。
-
-    Returns:
-        str: 拼接后的相关文档内容。如果没有向量库，则返回空字符串。
+    FAISS `similarity_search_with_score` 返回的 score 为距离型指标（数值越小通常越相似，
+    具体含义以 LangChain/FAISS 配置为准）；前端仅作「可观测性」展示。
     """
-    # 如果向量库目录不存在，说明还没有处理过任何上传文档。
-    # 这种情况下没有资料可检索，返回空字符串，让上层决定如何处理。
     if not os.path.exists(VECTOR_STORE_DIR):
-        return ""
+        return "", []
 
-    # 初始化 embedding 对象。
-    # similarity_search 会用它把 query 转成查询向量。
     embeddings = get_embeddings()
-
-    # 加载本地 FAISS 向量库。
-    # 注意：这里使用的 embeddings 必须和建库时的 embedding 模型一致。
-    # 如果换了 EMBEDDING_MODEL，旧向量库通常需要重建，否则向量空间不一致，检索质量会下降。
     vectorstore = FAISS.load_local(
         VECTOR_STORE_DIR,
         embeddings,
         allow_dangerous_deserialization=True,
     )
 
-    # 进行相似度检索，拿回最相关的前 top_k 个块。
-    #
-    # 内部大致流程：
-    # 1. 把 query 转成向量。
-    # 2. 在 FAISS 索引里查找距离最近的文档向量。
-    # 3. 返回这些向量对应的原始 Document。
-    docs = vectorstore.similarity_search(query, k=top_k)
+    pairs = vectorstore.similarity_search_with_score(query, k=top_k)
+    citations: List[Dict[str, Any]] = []
+    parts: List[str] = []
+    for doc, score in pairs:
+        parts.append(doc.page_content)
+        meta = doc.metadata or {}
+        src = meta.get("source") or meta.get("file_path") or ""
+        base = os.path.basename(str(src)) if src else "未知来源"
+        preview = doc.page_content.strip().replace("\n", " ")
+        if len(preview) > 220:
+            preview = preview[:220] + "…"
+        citations.append(
+            {
+                "source": base,
+                "page": meta.get("page"),
+                "distance": float(score),
+                "snippet_preview": preview,
+            }
+        )
 
-    # 把多个文档片段拼接成一个字符串。
-    #
-    # "\n\n---\n\n" 是分隔线，方便后续 prompt 中区分不同片段。
-    # 这里只返回 page_content，没有返回 metadata。如果你想在答案里显示来源页码，
-    # 可以同时读取 doc.metadata 并拼进 context。
-    context = "\n\n---\n\n".join([doc.page_content for doc in docs])
-    return context
+    context = "\n\n---\n\n".join(parts)
+    return context, citations
+
+
+def retrieve_relevant_context(query: str, top_k: int = 3) -> str:
+    """根据用户问题，从向量数据库中检索最相关的文档片段（仅正文，不含引用结构）。"""
+    text, _ = retrieve_relevant_context_with_citations(query, top_k=top_k)
+    return text
