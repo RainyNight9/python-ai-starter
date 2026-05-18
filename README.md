@@ -1,194 +1,418 @@
 # Python AI Starter 🚀
 
-[![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-00a393.svg)](https://fastapi.tiangolo.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![OpenAI Compatible](https://img.shields.io/badge/OpenAI-Compatible-412991.svg)](https://openai.com/)
+一个从零开始的 AI 全栈入门项目，帮助你快速掌握 AI 应用开发的核心技术。
 
-欢迎来到 **Python AI 全栈入门项目**！本项目专为你从 0 搭建自己的 AI 调用平台而设计，涵盖了「后端接口 + AI 调用 + 数据库存储 + 极简前端」。当前默认体验已对齐 **v3.2**：在 **v3.1**（流式、系统提示词、Token 历史、RAG、Agent）基础上，增加 **多会话**（`chat_sessions` + 请求体 `session_id`）与 **RAG 引用可观测**（检索片段的文件名、页码、距离、摘要预览；流式首行 `::META::` JSON，Agent 响应字段 `rag_citations`）。更细的小白向说明见 **[LEARNING_GUIDE.md](LEARNING_GUIDE.md)**。
+## 📖 项目简介
 
-通过这个项目，你将经历：**从工程入手 → 跑通 → 理解 → 升级 → 变成 AI 全栈** 的完整学习路径。
+本项目是一个完整的 AI 对话平台，包含：
 
-## 📑 目录 (Table of Contents)
-- [当前版本已实现能力 (v3.2)](#-当前版本已实现能力-v32)
-- [🟢 第一阶段：工程入手与跑通 (Run)](#-第一阶段工程入手与跑通-run)
-- [🔵 第二阶段：理解核心代码 (Understand)](#-第二阶段理解核心代码-understand)
-- [🟠 第三阶段：内置能力说明与仍可做的挑战 (Upgrade)](#-第三阶段内置能力说明与仍可做的挑战-upgrade)
-- [🔴 第四阶段：变成 AI 全栈 (Become Full-Stack)](#-第四阶段变成-ai-全栈-become-full-stack)
-- [🛠️ 常见问题与避坑指南 (Troubleshooting)](#-常见问题与避坑指南-troubleshooting)
-- [🤝 参与贡献 (Contributing)](#-参与贡献-contributing)
+- **后端**：FastAPI + SQLite + OpenAI 兼容接口
+- **前端**：React + TypeScript + Vite
+- **核心功能**：
+  - 💬 多会话管理
+  - 🌊 流式对话输出
+  - 📚 RAG 文档问答（检索增强生成）
+  - 🤖 Agent 工具调用
+  - 📊 完整的引用追踪
 
----
+## ✨ 当前版本功能 (v3.3+)
 
-## ✨ 当前版本已实现能力 (v3.2)
+### 基础功能
+- ✅ 多会话隔离管理
+- ✅ 流式对话（打字机效果）
+- ✅ 系统提示词自定义
+- ✅ 历史记录管理
+- ✅ Token 智能截断
 
-| 能力 | 说明 |
-|------|------|
-| **流式对话** | 前端默认（未勾选 Agent）调用 `POST /api/chat/stream`；首行固定为 `::META::` + JSON（`rag_citations`，可为空），随后为模型文本流。 |
-| **系统提示词** | 请求体字段 `system_prompt`；与 RAG 拼接后一并注入 system。 |
-| **多会话** | 表 `chat_sessions`；聊天请求体带 `session_id`（默认 `1`）；`GET/POST /api/sessions`、`DELETE /api/sessions/{id}`；`GET/DELETE /api/history?session_id=` 按会话隔离。 |
-| **历史与 Token** | 流式与 Agent 接口内用 `tiktoken`（`cl100k_base`）控制历史消息总 Token。 |
-| **RAG + 引用** | 检索使用 `similarity_search_with_score`；返回 `source`（文件名）、`page`、`distance`、`snippet_preview`；前端在黄色信息条展示。 |
-| **Agent / 工具调用** | `POST /api/chat/agent`：返回 `reply` + `steps` + `rag_citations`；需网关支持 `tools` / `tool_calls`。 |
-| **非流式兼容** | `POST /api/chat`：最近 10 条、无 RAG、无 `system_prompt`；同样支持 `session_id`。 |
-| **历史 API** | `GET /api/history?session_id=`；`DELETE /api/history?session_id=`。 |
+### RAG 功能
+- ✅ PDF/TXT 文档上传
+- ✅ 自动文档切片与向量化
+- ✅ 语义检索与引用展示
+- ✅ 文档管理（列表、删除、重建）
+- ✅ 可配置的检索参数
 
-**配置要点：**
+### Agent 功能
+- ✅ 计算器工具
+- ✅ 时间查询工具
+- ✅ 文档检索工具
+- ✅ 会话导出工具
+- ✅ 完整的工具调用轨迹
 
-- 聊天模型：`OPENAI_BASE_URL`、`OPENAI_API_KEY`、`MODEL_NAME`（见 `app/core/config.py` 与 `.env.example`）。
-- RAG 向量化：当前实现通过 **DashScope** 的 HTTP Embedding API；**与聊天共用** `OPENAI_API_KEY` 作为 Bearer。启用 RAG 时请确认该 Key 对 DashScope Embedding 有效，并理解其与聊天网关是否为同一套凭证（详见上表与 `app/rag/document_processor.py` 内注释）。
-- 向量模型：`EMBEDDING_MODEL`（如 `text-embedding-v3`），见 `.env.example`。
+### 前端功能
+- ✅ 现代化 UI 设计
+- ✅ 响应式布局
+- ✅ 实时流式显示
+- ✅ RAG 引用卡片
+- ✅ Agent 步骤展开
+- ✅ 知识库可视化管理
 
----
+## 🚀 快速开始
 
-## 🟢 第一阶段：工程入手与跑通 (Run)
+### 1. 环境要求
 
-### 1. 环境准备
-确保你已经安装了 Python 3.8 或以上版本。推荐使用虚拟环境：
-```bash
-python -m venv venv
-source venv/bin/activate  # Mac/Linux
-# venv\Scripts\activate   # Windows
-```
+- Python 3.8+
+- Node.js 18+
+- pnpm（推荐）或 npm
 
 ### 2. 安装依赖
+
 ```bash
+# 后端依赖
 pip install -r requirements.txt
+
+# 前端依赖
+cd frontend
+pnpm install
 ```
 
 ### 3. 配置环境变量
-1. 复制 `.env.example` 文件并重命名为 `.env`：
-   ```bash
-   cp .env.example .env
-   ```
-2. 打开 `.env` 文件，至少配置：
-   - `OPENAI_API_KEY`：**同一变量**在代码中被两处使用——`AsyncOpenAI` 聊天鉴权，以及 RAG 里 DashScope Embedding 的 `Bearer`（见 `document_processor.py`）。因此在你**不改代码**的前提下，若既要 RAG 又要聊天，需保证该 Key 对 **两处服务** 都可用；常见做法是聊天与向量均走 **DashScope**（或同一兼容网关），或仅使用不需要 DashScope 的聊天路径且暂时不用 RAG。
-   - `OPENAI_BASE_URL`、`MODEL_NAME`：按你的聊天模型提供方填写。
-   - `EMBEDDING_MODEL`：使用 RAG 时，与 DashScope 文档一致即可（默认 `text-embedding-v3`）。
-   > 若你希望「聊天用 A 厂商 Key、向量用 B 厂商 Key」，需要把配置拆成两个环境变量并在代码里分别传入；当前仓库未拆分。
+
+```bash
+# 复制配置模板
+cp .env.example .env
+
+# 编辑 .env 文件，填入你的配置
+# 必需配置：
+# - OPENAI_API_KEY: 你的 API 密钥
+# - OPENAI_BASE_URL: API 网关地址
+# - MODEL_NAME: 模型名称
+```
 
 ### 4. 启动服务
+
 ```bash
-uvicorn app.main:app --reload
-```
-若终端找不到 `uvicorn`，可使用：
-```bash
+# 启动后端（终端 1）
+make backend
+# 或
 python3 -m uvicorn app.main:app --reload
+
+# 启动前端（终端 2）
+make frontend
+# 或
+cd frontend && pnpm dev
 ```
 
-启动成功后，打开浏览器访问：[http://127.0.0.1:8000](http://127.0.0.1:8000)  
-在页面中可设置角色、上传 PDF/TXT 后再对话（默认走流式接口）。
+### 5. 访问应用
 
----
+- 前端界面：http://localhost:5173
+- API 文档：http://127.0.0.1:8000/docs
 
-## 🔵 第二阶段：理解核心代码 (Understand)
+## 📚 文档导航
 
-了解项目是怎么跑起来的，建议按下面顺序阅读（**零基础长文手册**见 [LEARNING_GUIDE.md](LEARNING_GUIDE.md)；代码已迭代至 **v3.2**）：
+### 新手入门
+- **[TESTING.md](TESTING.md)** - 完整的测试流程，带你体验所有功能
+- **[LEARNING_GUIDE.md](LEARNING_GUIDE.md)** - 零基础学习指南，详细讲解每个概念
 
-1. **`app/main.py`**（程序入口）  
-   挂载 API（`/api`）、静态前端（`static/`）、CORS。
+### 开发文档
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - 部署指南，包含 Docker 和生产环境配置
+- **[.env.example](.env.example)** - 配置说明，所有环境变量的详细解释
 
-2. **`app/db/models.py`**、`app/db/migrate.py`（v3.2 多会话）  
-   `ChatSession` / `ChatMessage.session_id`；启动时 SQLite 轻量迁移。
+### 代码结构
+```
+python-ai-starter/
+├── app/                    # 后端代码
+│   ├── api/               # API 路由
+│   │   └── endpoints.py   # 所有接口定义（已添加详细注释）
+│   ├── agent/             # Agent 工具
+│   │   ├── tools.py       # 工具实现（已添加详细注释）
+│   │   └── tool_definitions.py  # 工具声明
+│   ├── core/              # 核心配置
+│   │   └── config.py      # 环境变量配置
+│   ├── db/                # 数据库
+│   │   ├── models.py      # 数据模型
+│   │   ├── database.py    # 数据库连接
+│   │   └── migrate.py     # 数据库迁移
+│   ├── rag/               # RAG 功能
+│   │   └── document_processor.py  # 文档处理（已添加详细注释）
+│   ├── services/          # 业务逻辑
+│   │   ├── llm.py         # LLM 调用
+│   │   └── agent_service.py  # Agent 编排
+│   └── main.py            # 应用入口
+├── frontend/              # 前端代码
+│   ├── src/
+│   │   ├── App.tsx        # 主应用组件（已添加详细注释）
+│   │   ├── App.css        # 样式文件
+│   │   └── main.tsx       # 入口文件
+│   └── vite.config.ts     # Vite 配置
+├── uploads/               # 上传的文档
+├── static/                # 静态文件（教学版前端）
+├── .env.example           # 配置模板
+├── requirements.txt       # Python 依赖
+├── Makefile              # 快捷命令
+└── README.md             # 本文件
+```
 
-3. **`app/core/config.py`**（配置）  
-   从环境变量读取 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`MODEL_NAME`、`EMBEDDING_MODEL` 等。
+## 🎯 核心概念
 
-4. **`app/services/llm.py`**（聊天模型调用）  
-   `generate_ai_response_stream`：流式 + `system_prompt` + `history`；`generate_ai_response`：非流式，供 `/api/chat` 使用。
+### 1. 多会话管理
 
-5. **`app/api/endpoints.py`**（HTTP 接口）  
-   - `POST /chat/stream`：按 `session_id` 存消息 → RAG 检索（含引用元数据）→ Token 截断历史 → 流式输出（首行 `::META::`）。  
-   - `POST /chat/agent`：同上，响应含 `steps` 与 `rag_citations`。  
-   - `GET/POST /api/sessions`、`DELETE /api/sessions/{id}`；`GET/DELETE /history?session_id=`。  
-   - `POST /upload`、`POST /chat`：见上表。
+每个会话独立存储聊天记录，互不干扰：
 
-6. **`app/services/agent_service.py`**、`app/agent/`（Agent）  
-   工具声明与实现、`run_tool_agent` 多轮 `tool_calls` 编排与 `steps` 轨迹。
+```python
+# 数据库模型
+ChatSession:
+  - id: 会话 ID
+  - title: 会话标题
+  - created_at: 创建时间
 
-7. **`app/rag/document_processor.py`**（RAG）  
-   文档加载、切块、DashScope Embedding、FAISS；`retrieve_relevant_context_with_citations` 返回正文与引用列表。
+ChatMessage:
+  - id: 消息 ID
+  - session_id: 所属会话
+  - role: user/assistant
+  - content: 消息内容
+```
 
-8. **`app/db/database.py`**（持久化）  
-   引擎、`get_db`、会话工厂。
+### 2. RAG（检索增强生成）
 
-9. **`static/index.html`**（前端）  
-   会话切换/新建/删除、系统提示词、上传、Agent 勾选、流式解析 `::META::` 与 RAG 引用展示、历史按会话加载。
+工作流程：
+1. 用户上传文档 → 文档切片 → 向量化 → 存入向量库
+2. 用户提问 → 问题向量化 → 检索相似片段 → 拼接到 prompt
+3. LLM 基于检索内容回答 → 返回答案和引用信息
 
----
+### 3. Agent 工具调用
 
-## 🟠 第三阶段：内置能力说明与仍可做的挑战 (Upgrade)
+Agent 可以自主决定调用哪些工具：
 
-下列能力 **已在当前代码中实现**，适合对照源码阅读，而不是从零重做一遍：
+```
+用户: "现在几点？帮我算一下到晚上8点还有多久"
+  ↓
+Agent 思考: 需要先查询时间，再进行计算
+  ↓
+调用工具 1: get_server_time() → "14:30"
+  ↓
+调用工具 2: calculate("(20-14)*60 + (0-30)") → "330分钟"
+  ↓
+返回: "现在是14:30，距离晚上8点还有330分钟（5.5小时）"
+```
 
-- **流式输出**：`/api/chat/stream` + `llm.generate_ai_response_stream`；首行 `::META::` 承载 `rag_citations`。
-- **系统提示词**：`ChatRequest.system_prompt`，流式与 Agent 链路均可使用（非流式 `/api/chat` 除外）。
-- **多会话**：`ChatSession` + `session_id`；`/api/sessions` 与按会话的 `/api/history`。
-- **RAG 引用可观测**：`retrieve_relevant_context_with_citations` + 前端黄色引用条；Agent 响应字段 `rag_citations`。
-- **Agent 工具调用**：`/api/chat/agent` + `agent_service.run_tool_agent` + `app/agent/`；前端展示 `steps`。
-- **换模型 / 换网关**：改 `.env` 中的 `OPENAI_BASE_URL`、`MODEL_NAME`、`OPENAI_API_KEY`；无需改 `llm.py` 里的 URL（客户端从 `settings` 读取）。
+### 4. 流式输出
 
-你仍可尝试的 **进阶挑战**（仓库尚未实现或仅部分涉及）：
+使用 Server-Sent Events (SSE) 实现打字机效果：
 
-1. **会话增强**：重命名会话、导出某会话为 Markdown、会话级「清空向量库」等。  
-2. **统一两条聊天接口**：让 `/api/chat` 也支持 `system_prompt` 与 RAG，或明确在文档中保留「简化版 vs 完整版」的教学分工（当前为后者）。  
-3. **RAG 增强**：混合检索、rerank、按文档删除索引、重建向量库等。  
-4. **流式 Agent / 更多工具**：在现有 Agent 循环上增加 SSE、搜索、天气、业务 API 等（注意工具安全与白名单）。
+```
+客户端发送请求
+  ↓
+服务端首行返回: ::META::{"rag_citations":[...]}
+  ↓
+服务端逐字返回: "根" "据" "参" "考" "资" "料" "..."
+  ↓
+客户端实时显示
+```
 
----
+## 🔧 配置说明
 
-## 🔴 第四阶段：变成 AI 全栈 (Become Full-Stack)
+### 必需配置
 
-在掌握 v3.2 代码路径基础上，可继续深入：
+```env
+# 聊天模型配置
+OPENAI_API_KEY=sk-xxx              # 你的 API 密钥
+OPENAI_BASE_URL=https://api.openai.com/v1  # API 网关
+MODEL_NAME=gpt-4o-mini             # 模型名称
+```
 
-1. **RAG 工程化**：更大规模的切片策略、评测集、幻觉与引用格式规范；向量库可对比 Chroma / Milvus 与当前 FAISS 本地方案的差异。  
-2. **Agent 进阶**：流式工具回合、并行工具、更强错误恢复与观测（日志 / OpenTelemetry）。  
-3. **前端工程化**：在保留本仓库「单文件可读」的前提下，增加 React/Vue 等示例目录或独立小项目。
+### 可选配置
 
----
+```env
+# RAG 向量化配置（不填则使用 OPENAI_API_KEY）
+EMBEDDING_API_KEY=sk-xxx
+EMBEDDING_MODEL=text-embedding-v3
 
-## 🛠️ 常见问题与避坑指南 (Troubleshooting)
+# RAG 检索参数
+RAG_TOP_K=3                        # 检索返回的文档片段数
+RAG_CHUNK_SIZE=500                 # 文档切片大小（字符）
+RAG_CHUNK_OVERLAP=50               # 切片重叠大小（字符）
 
-在初次跑通项目的过程中，如果你遇到了环境或依赖安装问题，可以参考以下解决办法：
+# 数据库
+DATABASE_URL=sqlite:///./ai_platform.db
+```
 
-### 1. `pip install` 报错（如 `pydantic-core` 编译失败）
-- **原因**：如果你使用的是较新的 Python 版本（如 Python 3.14），旧版本的依赖包（带写死版本号）可能还没提供预编译的 wheel 包，导致系统尝试从 C/Rust 源码编译安装时由于 API 不兼容而报错。
-- **解决办法**：
-  1. 去掉 `requirements.txt` 里的版本号锁定（例如把 `pydantic==2.5.3` 改成 `pydantic`），让系统自动拉取适配你当前 Python 版本的最新包。
-  2. 使用明确的模块调用方式来安装：
-     ```bash
-     python3 -m pip install -r requirements.txt
-     ```
+## 📖 使用示例
 
-### 2. 终端提示 `zsh: command not found: uvicorn`
-- **原因**：当 `pip` 发现当前用户对全局 Python 环境没有写入权限时，会自动把包安装到用户独立的目录下（如 `~/.local/bin` 或 `~/Library/Python/3.14/bin`）。如果这个目录没有被配置到你的系统变量（PATH）里，终端就找不到 `uvicorn` 命令。
-- **解决办法**：
-  不需要修改环境变量，直接通过 Python 模块的方式调用 Uvicorn 即可：
-  ```bash
-  python3 -m uvicorn app.main:app --reload
-  ```
+### 示例 1：基础对话
 
-### 3. RAG 上传成功但对话似乎「用不上文档」
-- **检查**：`OPENAI_API_KEY` 是否对 **DashScope Embedding** 请求有效（与聊天是否同一厂商需结合你的配置判断）；`app/rag/vectorstore` 是否在首次上传后生成；对话是否走 **`/api/chat/stream`** 或 **`/api/chat/agent`**（二者均会注入检索结果）。非流式 `/api/chat` **不会**调用 RAG。
+```
+用户: "Python 有哪些特点？"
+系统提示词: "你是一个 Python 专家"
 
----
+AI: "Python 的主要特点包括：
+1. 简洁易读的语法
+2. 动态类型系统
+3. 丰富的标准库
+..."
+```
 
-## 🤝 参与贡献 (Contributing)
+### 示例 2：RAG 文档问答
 
-作为一个开源的入门级项目，我们非常欢迎任何形式的贡献，包括但不限于：
-- 修复代码或文档中的错别字/Bug
-- 提交「第三阶段」进阶挑战的实现代码（可以提交到 `examples/` 目录下）
-- 优化前端界面的 UI
+```
+1. 上传文档: "Python教程.pdf"
+2. 提问: "这个教程讲了什么内容？"
 
-**贡献流程：**
+AI: "根据参考资料，这个教程主要讲解了..."
+
+引用信息:
+- 文件: Python教程.pdf
+- 页码: 第 1 页
+- 相似度: 0.234
+- 片段: "本教程将介绍 Python 的基础语法..."
+```
+
+### 示例 3：Agent 工具调用
+
+```
+用户: "帮我计算 (100 + 200) * 3，然后从文档中查找相关内容"
+
+Agent 执行步骤:
+1. 调用 calculate("(100 + 200) * 3") → "900"
+2. 调用 search_uploaded_documents("计算") → 检索结果
+3. 综合回答: "计算结果是 900。根据文档..."
+```
+
+## 🧪 测试流程
+
+详细的测试步骤请查看 [TESTING.md](TESTING.md)，包括：
+
+1. ✅ 后端 API 测试（16 项）
+2. ✅ 前端功能测试（13 项）
+3. ✅ 集成场景测试（4 项）
+4. ✅ 常见问题排查
+
+## 🎓 学习路径
+
+### 第一步：跑通项目（30 分钟）
+1. 按照"快速开始"配置环境
+2. 启动后端和前端
+3. 完成 TESTING.md 中的基础测试
+
+### 第二步：理解代码（2-3 小时）
+1. 阅读 LEARNING_GUIDE.md
+2. 按顺序阅读核心文件（已添加详细注释）：
+   - `app/main.py` - 应用入口
+   - `app/api/endpoints.py` - API 接口
+   - `app/services/llm.py` - LLM 调用
+   - `app/rag/document_processor.py` - RAG 实现
+   - `app/agent/tools.py` - Agent 工具
+   - `frontend/src/App.tsx` - 前端主组件
+
+### 第三步：动手实践（1-2 天）
+1. 修改系统提示词，定制 AI 角色
+2. 添加自己的工具函数
+3. 调整 RAG 参数，优化检索效果
+4. 美化前端界面
+
+### 第四步：进阶开发（持续）
+1. 接入更多模型提供商
+2. 实现流式 Agent
+3. 添加更多工具（搜索、天气等）
+4. 部署到生产环境
+
+## 🔍 核心 API 接口
+
+### 会话管理
+- `GET /api/sessions` - 获取会话列表
+- `POST /api/sessions` - 创建新会话
+- `DELETE /api/sessions/{id}` - 删除会话
+
+### 聊天接口
+- `POST /api/chat/stream` - 流式对话（支持 RAG）
+- `POST /api/chat/agent` - Agent 对话（支持工具调用）
+- `POST /api/chat` - 非流式对话（简化版）
+
+### 文档管理
+- `POST /api/upload` - 上传文档
+- `GET /api/documents` - 文档列表
+- `DELETE /api/documents/{filename}` - 删除文档
+- `POST /api/documents/rebuild` - 重建向量库
+
+### 历史记录
+- `GET /api/history?session_id=1` - 获取历史
+- `DELETE /api/history?session_id=1` - 清空历史
+
+### RAG 配置
+- `GET /api/rag/settings` - 查看 RAG 配置
+
+## 🛠️ 开发工具
+
+### Makefile 命令
+
+```bash
+make backend          # 启动后端
+make frontend         # 启动前端
+make frontend-build   # 构建前端
+make test            # 运行测试
+make check           # 完整检查（测试+构建）
+```
+
+### API 文档
+
+访问 http://127.0.0.1:8000/docs 查看交互式 API 文档，可以直接测试所有接口。
+
+## 🐛 常见问题
+
+### Q1: 后端启动失败
+**A:** 检查 Python 版本和依赖安装，使用 `python3 -m uvicorn app.main:app --reload`
+
+### Q2: 文档上传失败
+**A:** 确认 `EMBEDDING_API_KEY` 配置正确，检查文件格式（只支持 PDF/TXT）
+
+### Q3: RAG 检索无结果
+**A:** 确认文档已成功上传，检查 `app/rag/vectorstore/` 目录是否存在
+
+### Q4: Agent 工具不调用
+**A:** 确认模型支持 function calling（如 gpt-4、qwen-plus）
+
+### Q5: 前端无法连接后端
+**A:** 确认后端正在运行，检查 `vite.config.ts` 中的代理配置
+
+更多问题请查看 [TESTING.md](TESTING.md) 的"常见问题排查"章节。
+
+## 📦 部署
+
+### 开发环境
+```bash
+# 后端
+make backend
+
+# 前端
+make frontend
+```
+
+### 生产环境
+
+详细部署方案请查看 [DEPLOYMENT.md](DEPLOYMENT.md)，包括：
+- Docker 部署
+- Nginx 反向代理
+- 环境变量管理
+- 持久化存储配置
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+贡献方式：
 1. Fork 本仓库
-2. 创建你的特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交你的更改 (`git commit -m 'Add some AmazingFeature'`)
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 发起 Pull Request
 
-## 📄 开源协议 (License)
+## 📄 开源协议
 
-本项目采用 [MIT License](LICENSE) 开源协议。你可以自由地使用、修改和分发本项目代码。
+本项目采用 [MIT License](LICENSE) 开源协议。
 
-> **开始你的代码之旅吧！如有问题随时呼叫我。**
+## 🙏 致谢
+
+感谢所有贡献者和使用者！
+
+## 📞 联系方式
+
+- 提交 Issue：[GitHub Issues](https://github.com/your-repo/issues)
+- 讨论交流：[GitHub Discussions](https://github.com/your-repo/discussions)
+
+---
+
+**开始你的 AI 全栈之旅吧！** 🚀
+
+如有问题，请先查看：
+1. [TESTING.md](TESTING.md) - 测试流程
+2. [LEARNING_GUIDE.md](LEARNING_GUIDE.md) - 学习指南
+3. [DEPLOYMENT.md](DEPLOYMENT.md) - 部署指南

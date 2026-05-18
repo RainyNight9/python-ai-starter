@@ -101,4 +101,45 @@ def get_openai_style_tools() -> List[Dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_uploaded_documents",
+                "description": (
+                    "从用户已经上传并入库的 PDF/TXT 文档中检索相关片段。"
+                    "当用户的问题需要基于知识库、资料、文件内容回答时使用。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "要检索的自然语言问题或关键词",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "返回片段数量，建议 3，最大 8",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "export_session_markdown",
+                "description": "把当前会话聊天记录导出为 Markdown 文本。用户要求导出、整理或保存会话时使用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "integer",
+                            "description": "可选。要导出的会话 ID；不传则使用当前会话。",
+                        }
+                    },
+                    "required": [],
+                },
+            },
+        },
     ]

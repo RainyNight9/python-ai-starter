@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import Any, Dict, List, Tuple
 
 import requests
@@ -88,7 +89,7 @@ def _dashscope_embed_texts(texts: List[str], text_type: str) -> List[List[float]
     # 注意：这里读取的是 settings.OPENAI_API_KEY。这个项目可能复用了 OpenAI 风格
     # 的配置字段名，但实际请求地址是 DashScope。学习时要区分“变量名”和“真实服务”。
     headers = {
-        "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+        "Authorization": f"Bearer {settings.EMBEDDING_API_KEY}",
         "Content-Type": "application/json",
     }
 
@@ -239,11 +240,11 @@ def process_and_store_document(file_path: str):
     text_splitter = RecursiveCharacterTextSplitter(
         # 每个文本块大约 500 个字符。
         # 对中文来说“字符数”和“token 数”不是完全等价的，但可以作为简单起点。
-        chunk_size=500,
+        chunk_size=settings.RAG_CHUNK_SIZE,
 
-        # 相邻文本块之间重叠 50 个字符。
+        # 相邻文本块之间重叠一定字符。
         # 这样可以降低一句话或一个段落被切断后语义丢失的概率。
-        chunk_overlap=50,
+        chunk_overlap=settings.RAG_CHUNK_OVERLAP,
 
         # 分隔符优先级。
         #
@@ -302,8 +303,66 @@ def process_and_store_document(file_path: str):
     return len(chunks)
 
 
+def list_uploaded_documents() -> List[Dict[str, Any]]:
+    """列出 uploads 目录中的文档文件。"""
+    uploads_dir = "uploads"
+    if not os.path.exists(uploads_dir):
+        return []
+
+    documents: List[Dict[str, Any]] = []
+    for filename in sorted(os.listdir(uploads_dir)):
+        if not filename.lower().endswith((".pdf", ".txt")):
+            continue
+        path = os.path.join(uploads_dir, filename)
+        if not os.path.isfile(path):
+            continue
+        stat = os.stat(path)
+        documents.append(
+            {
+                "filename": filename,
+                "size_bytes": stat.st_size,
+                "modified_at": int(stat.st_mtime),
+            }
+        )
+    return documents
+
+
+def clear_vector_store() -> None:
+    """删除本地 FAISS 向量库目录。"""
+    if os.path.exists(VECTOR_STORE_DIR):
+        shutil.rmtree(VECTOR_STORE_DIR)
+
+
+def delete_uploaded_document(filename: str) -> bool:
+    """删除 uploads 目录中的某个文档文件。"""
+    safe_filename = os.path.basename(filename)
+    path = os.path.join("uploads", safe_filename)
+    if not os.path.isfile(path):
+        return False
+    os.remove(path)
+    return True
+
+
+def rebuild_vector_store_from_uploads() -> int:
+    """清空向量库后，重新处理 uploads 目录下所有 PDF/TXT 文件。"""
+    clear_vector_store()
+    total_chunks = 0
+    for doc in list_uploaded_documents():
+        path = os.path.join("uploads", doc["filename"])
+        total_chunks += process_and_store_document(path)
+    return total_chunks
+
+
+def delete_document_and_rebuild(filename: str) -> bool:
+    """删除指定文档后重建向量库，确保检索结果不再包含该文件。"""
+    deleted = delete_uploaded_document(filename)
+    if deleted:
+        rebuild_vector_store_from_uploads()
+    return deleted
+
+
 def retrieve_relevant_context_with_citations(
-    query: str, top_k: int = 3
+    query: str, top_k: int | None = None
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """检索相关片段，并返回用于 UI 展示的引用信息（文件名、页码、距离、摘要）。
 
@@ -320,7 +379,7 @@ def retrieve_relevant_context_with_citations(
         allow_dangerous_deserialization=True,
     )
 
-    pairs = vectorstore.similarity_search_with_score(query, k=top_k)
+    pairs = vectorstore.similarity_search_with_score(query, k=top_k or settings.RAG_TOP_K)
     citations: List[Dict[str, Any]] = []
     parts: List[str] = []
     for doc, score in pairs:
@@ -344,7 +403,7 @@ def retrieve_relevant_context_with_citations(
     return context, citations
 
 
-def retrieve_relevant_context(query: str, top_k: int = 3) -> str:
+def retrieve_relevant_context(query: str, top_k: int | None = None) -> str:
     """根据用户问题，从向量数据库中检索最相关的文档片段（仅正文，不含引用结构）。"""
     text, _ = retrieve_relevant_context_with_citations(query, top_k=top_k)
     return text

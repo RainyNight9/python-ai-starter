@@ -30,6 +30,8 @@ import re
 from datetime import datetime
 from typing import Any, Callable, Dict, Optional
 
+from app.rag.document_processor import retrieve_relevant_context_with_citations
+
 # ---------------------------------------------------------------------------
 # 安全计算器：仅允许数字与 + - * / 括号，以及一元正负号
 # ---------------------------------------------------------------------------
@@ -129,6 +131,85 @@ def reverse_text(text: str) -> str:
     return text[::-1]
 
 
+def search_uploaded_documents(query: str, top_k: int = 3) -> str:
+    """从已上传文档的向量库中检索相关片段。"""
+    if not query.strip():
+        return "错误：检索问题为空"
+
+    try:
+        context, citations = retrieve_relevant_context_with_citations(
+            query=query,
+            top_k=max(1, min(int(top_k), 8)),
+        )
+    except Exception as e:
+        return f"错误：文档检索失败（{e.__class__.__name__}: {e}）"
+
+    if not context:
+        return "没有检索到相关文档片段。"
+
+    citation_lines = []
+    for idx, citation in enumerate(citations, 1):
+        page = citation.get("page")
+        page_text = f"第 {page + 1} 页" if isinstance(page, int) else "页码未知"
+        citation_lines.append(
+            f"[{idx}] {citation.get('source', '未知来源')}，{page_text}，"
+            f"距离 {citation.get('distance')}"
+        )
+
+    return "相关片段：\n" + context + "\n\n引用：\n" + "\n".join(citation_lines)
+
+
+def export_session_markdown(session_id: Optional[int] = None) -> str:
+    """导出当前会话为 Markdown 文本，由 Agent 运行上下文提供 session_id。"""
+    active_session_id = session_id or _TOOL_CONTEXT.get("session_id")
+    if not active_session_id:
+        return "错误：缺少 session_id，无法导出会话。"
+
+    try:
+        from app.db.database import SessionLocal
+        from app.db import models
+
+        db = SessionLocal()
+        records = (
+            db.query(models.ChatMessage)
+            .filter(models.ChatMessage.session_id == int(active_session_id))
+            .order_by(models.ChatMessage.id.asc())
+            .all()
+        )
+        if not records:
+            return f"# 会话 {active_session_id}\n\n暂无聊天记录。"
+
+        lines = [f"# 会话 {active_session_id}", ""]
+        for record in records:
+            role = "用户" if record.role == "user" else "助手"
+            lines.append(f"## {role} · {record.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append("")
+            lines.append(record.content)
+            lines.append("")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"错误：导出会话失败（{e.__class__.__name__}: {e}）"
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+_TOOL_CONTEXT: Dict[str, Any] = {}
+
+
+def set_tool_context(**kwargs: Any) -> None:
+    """设置本轮 Agent 工具运行上下文。"""
+    _TOOL_CONTEXT.clear()
+    _TOOL_CONTEXT.update(kwargs)
+
+
+def clear_tool_context() -> None:
+    """清空本轮 Agent 工具运行上下文。"""
+    _TOOL_CONTEXT.clear()
+
+
 # ---------------------------------------------------------------------------
 # 工具分发器：根据模型给出的 function.name 调用对应 Python 函数
 # ---------------------------------------------------------------------------
@@ -140,6 +221,12 @@ TOOL_REGISTRY: Dict[str, Callable[..., str]] = {
         kwargs.get("timezone_hint") or None
     ),
     "reverse_text": lambda **kwargs: reverse_text(kwargs.get("text", "")),
+    "search_uploaded_documents": lambda **kwargs: search_uploaded_documents(
+        kwargs.get("query", ""), kwargs.get("top_k", 3)
+    ),
+    "export_session_markdown": lambda **kwargs: export_session_markdown(
+        kwargs.get("session_id")
+    ),
 }
 
 
